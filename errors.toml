@@ -1101,6 +1101,11 @@ error = '''
 JSON column '%-.192s' cannot be used in key specification.
 '''
 
+["ddl:3184"]
+error = '''
+Invalid encryption option.
+'''
+
 ["ddl:3505"]
 error = '''
 Too long enumeration/set value for column %s.

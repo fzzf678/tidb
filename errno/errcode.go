@@ -913,6 +913,18 @@ const (
 	ErrDefValGeneratedNamedFunctionIsNotAllowed              = 3770
 	ErrFKIncompatibleColumns                                 = 3780
 	ErrFunctionalIndexRowValueIsNotAllowed                   = 3800
+	ErrNonBooleanExprForCheckConstraint                      = 3812
+	ErrColumnCheckConstraintReferencesOtherColumn            = 3813
+	ErrCheckConstraintNamedFunctionIsNotAllowed              = 3814
+	ErrCheckConstraintFunctionIsNotAllowed                   = 3815
+	ErrCheckConstraintVariables                              = 3816
+	ErrCheckConstraintRowValue                               = 3817
+	ErrCheckConstraintRefersAutoIncrementColumn              = 3818
+	ErrCheckConstraintViolated                               = 3819
+	ErrTableCheckConstraintReferUnknown                      = 3820
+	ErrCheckConstraintNotFound                               = 3821
+	ErrCheckConstraintDupName                                = 3822
+	ErrCheckConstraintClauseUsingFKReferActionColumn         = 3823
 	ErrDependentByFunctionalIndex                            = 3837
 	ErrCannotConvertString                                   = 3854
 	ErrDependentByPartitionFunctional                        = 3855
@@ -922,7 +934,7 @@ const (
 	ErrFunctionalIndexNotApplicable                          = 3909
 	ErrDynamicPrivilegeNotRegistered                         = 3929
 	ErUserAccessDeniedForUserAccountBlockedByPasswordLock    = 3955
-	ErrJSONInBooleanContext                                  = 3986
+	ErrDependentByCheckConstraint                            = 3959
 	ErrTableWithoutPrimaryKey                                = 3750
 	// MariaDB errors.
 	ErrOnlyOneDefaultPartionAllowed         = 4030
