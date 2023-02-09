@@ -10,6 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package table
 
 import (
@@ -30,6 +31,7 @@ type Constraint struct {
 	ConstraintExpr expression.Expression
 }
 
+// ToConstraint converts model.ConstraintInfo to Constraint
 func ToConstraint(constraintInfo *model.ConstraintInfo, tblInfo *model.TableInfo) (*Constraint, error) {
 	ctx := mock.NewContext()
 	dbName := model.NewCIStr(ctx.GetSessionVars().CurrentDB)
@@ -59,6 +61,7 @@ func buildConstraintExpression(ctx sessionctx.Context, exprString string,
 	return exprs[0], nil
 }
 
+// ToInfo get the ConstraintInfo of the Constraint
 func (c *Constraint) ToInfo() *model.ConstraintInfo {
 	return c.ConstraintInfo
 }

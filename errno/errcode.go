@@ -936,6 +936,7 @@ const (
 	ErrConstraintNotFound                                    = 3940
 	ErUserAccessDeniedForUserAccountBlockedByPasswordLock    = 3955
 	ErrDependentByCheckConstraint                            = 3959
+	ErrJSONInBooleanContext                                  = 3986
 	ErrTableWithoutPrimaryKey                                = 3750
 	// MariaDB errors.
 	ErrOnlyOneDefaultPartionAllowed         = 4030

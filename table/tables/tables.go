@@ -320,6 +320,7 @@ func (t *TableCommon) WritableCols() []*table.Column {
 	return writableColumns
 }
 
+// WritableConstraint returns constraints of the table in writable states.
 func (t *TableCommon) WritableConstraint() []*table.Constraint {
 	if len(t.WritableConstraints) > 0 {
 		return t.WritableConstraints
