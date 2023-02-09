@@ -929,6 +929,7 @@ var MySQLErrName = map[uint16]*mysql.ErrMessage{
 	ErrCheckConstraintClauseUsingFKReferActionColumn:         mysql.Message("Column '%s' cannot be used in a check constraint '%s': needed in a foreign key constraint '%s' referential action.", nil),
 	ErrUnsupportedConstraintCheck:                            mysql.Message("%s is not supported", nil),
 	ErrDynamicPrivilegeNotRegistered:                         mysql.Message("Dynamic privilege '%s' is not registered with the server.", nil),
+	ErrConstraintNotFound:                                    mysql.Message("Constraint '%s' does not exist.", nil),
 	ErrIllegalPrivilegeLevel:                                 mysql.Message("Illegal privilege level specified for %s", nil),
 	ErrCTERecursiveRequiresUnion:                             mysql.Message("Recursive Common Table Expression '%s' should contain a UNION", nil),
 	ErrCTERecursiveRequiresNonRecursiveFirst:                 mysql.Message("Recursive Common Table Expression '%s' should have one or more non-recursive query blocks followed by one or more recursive ones", nil),
@@ -937,7 +938,6 @@ var MySQLErrName = map[uint16]*mysql.ErrMessage{
 	ErrInvalidRequiresSingleReference:                        mysql.Message("In recursive query block of Recursive Common Table Expression '%s', the recursive table must be referenced only once, and not in any subquery", nil),
 	ErrCTEMaxRecursionDepth:                                  mysql.Message("Recursive query aborted after %d iterations. Try increasing @@cte_max_recursion_depth to a larger value", nil),
 	ErrTableWithoutPrimaryKey:                                mysql.Message("Unable to create or change a table without a primary key, when the system variable 'sql_require_primary_key' is set. Add a primary key to the table or unset this variable to avoid this message. Note that tables without a primary key can cause performance problems in row-based replication, so please consult your DBA before changing this setting.", nil),
-	ErrJSONInBooleanContext:                                  mysql.Message("Evaluating a JSON value in SQL boolean context does an implicit comparison against JSON integer 0; if this is not what you want, consider converting JSON to a SQL numeric type with JSON_VALUE RETURNING", nil),
 	// MariaDB errors.
 	ErrOnlyOneDefaultPartionAllowed:         mysql.Message("Only one DEFAULT partition allowed", nil),
 	ErrWrongPartitionTypeExpectedSystemTime: mysql.Message("Wrong partitioning type, expected type: `SYSTEM_TIME`", nil),

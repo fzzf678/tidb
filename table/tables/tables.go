@@ -43,6 +43,7 @@ import (
 	"github.com/pingcap/tidb/tablecodec"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util"
+	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tidb/util/codec"
 	"github.com/pingcap/tidb/util/collate"
 	"github.com/pingcap/tidb/util/generatedexpr"
@@ -70,6 +71,8 @@ type TableCommon struct {
 	meta                            *model.TableInfo
 	allocs                          autoid.Allocators
 	sequence                        *sequenceCommon
+	Constraints                     []*table.Constraint
+	WritableConstraints             []*table.Constraint
 
 	// recordPrefix and indexPrefix are generated using physicalTableID.
 	recordPrefix kv.Key
@@ -84,8 +87,17 @@ func MockTableFromMeta(tblInfo *model.TableInfo) table.Table {
 		columns = append(columns, col)
 	}
 
+	constraints := make([]*table.Constraint, 0, len(tblInfo.Constraints))
+	for _, constraintInfo := range tblInfo.Constraints {
+		constraint, err := table.ToConstraint(constraintInfo, tblInfo)
+		if err != nil {
+			return nil
+		}
+		constraints = append(constraints, constraint)
+	}
+
 	var t TableCommon
-	initTableCommon(&t, tblInfo, tblInfo.ID, columns, autoid.NewAllocators(false))
+	initTableCommon(&t, tblInfo, tblInfo.ID, columns, autoid.NewAllocators(false), constraints)
 	if tblInfo.TableCacheStatusType != model.TableCacheStatusDisable {
 		ret, err := newCachedTable(&t)
 		if err != nil {
@@ -148,8 +160,17 @@ func TableFromMeta(allocs autoid.Allocators, tblInfo *model.TableInfo) (table.Ta
 		columns = append(columns, col)
 	}
 
+	constraints := make([]*table.Constraint, 0, len(tblInfo.Constraints))
+	for _, conInfo := range tblInfo.Constraints {
+		con, err := table.ToConstraint(conInfo, tblInfo)
+		if err != nil {
+			return nil, err
+		}
+		constraints = append(constraints, con)
+	}
+
 	var t TableCommon
-	initTableCommon(&t, tblInfo, tblInfo.ID, columns, allocs)
+	initTableCommon(&t, tblInfo, tblInfo.ID, columns, allocs, constraints)
 	if tblInfo.GetPartitionInfo() == nil {
 		if err := initTableIndices(&t); err != nil {
 			return nil, err
@@ -163,16 +184,18 @@ func TableFromMeta(allocs autoid.Allocators, tblInfo *model.TableInfo) (table.Ta
 }
 
 // initTableCommon initializes a TableCommon struct.
-func initTableCommon(t *TableCommon, tblInfo *model.TableInfo, physicalTableID int64, cols []*table.Column, allocs autoid.Allocators) {
+func initTableCommon(t *TableCommon, tblInfo *model.TableInfo, physicalTableID int64, cols []*table.Column, allocs autoid.Allocators, constraints []*table.Constraint) {
 	t.tableID = tblInfo.ID
 	t.physicalTableID = physicalTableID
 	t.allocs = allocs
 	t.meta = tblInfo
 	t.Columns = cols
+	t.Constraints = constraints
 	t.PublicColumns = t.Cols()
 	t.VisibleColumns = t.VisibleCols()
 	t.HiddenColumns = t.HiddenCols()
 	t.WritableColumns = t.WritableCols()
+	t.WritableConstraints = t.WritableConstraint()
 	t.FullHiddenColsAndVisibleColumns = t.FullHiddenColsAndVisibleCols()
 	t.recordPrefix = tablecodec.GenTableRecordPrefix(physicalTableID)
 	t.indexPrefix = tablecodec.GenTableIndexPrefix(physicalTableID)
@@ -196,8 +219,8 @@ func initTableIndices(t *TableCommon) error {
 	return nil
 }
 
-func initTableCommonWithIndices(t *TableCommon, tblInfo *model.TableInfo, physicalTableID int64, cols []*table.Column, allocs autoid.Allocators) error {
-	initTableCommon(t, tblInfo, physicalTableID, cols, allocs)
+func initTableCommonWithIndices(t *TableCommon, tblInfo *model.TableInfo, physicalTableID int64, cols []*table.Column, allocs autoid.Allocators, constraints []*table.Constraint) error {
+	initTableCommon(t, tblInfo, physicalTableID, cols, allocs, constraints)
 	return initTableIndices(t)
 }
 
@@ -297,6 +320,23 @@ func (t *TableCommon) WritableCols() []*table.Column {
 	return writableColumns
 }
 
+func (t *TableCommon) WritableConstraint() []*table.Constraint {
+	if len(t.WritableConstraints) > 0 {
+		return t.WritableConstraints
+	}
+	if t.Constraints == nil {
+		return nil
+	}
+	writeableConstraint := make([]*table.Constraint, 0, len(t.Constraints))
+	for _, con := range t.Constraints {
+		if con.State == model.StateDeleteOnly || con.State == model.StateDeleteReorganization {
+			continue
+		}
+		writeableConstraint = append(writeableConstraint, con)
+	}
+	return writeableConstraint
+}
+
 // DeletableCols implements table DeletableCols interface.
 func (t *TableCommon) DeletableCols() []*table.Column {
 	return t.Columns
@@ -364,6 +404,7 @@ func (t *TableCommon) UpdateRecord(ctx context.Context, sctx sessionctx.Context,
 		binlogOldRow = make([]types.Datum, 0, numColsCap)
 		binlogNewRow = make([]types.Datum, 0, numColsCap)
 	}
+	rowToCheck := make([]types.Datum, 0, numColsCap)
 
 	for _, col := range t.Columns {
 		var value types.Datum
@@ -402,12 +443,24 @@ func (t *TableCommon) UpdateRecord(ctx context.Context, sctx sessionctx.Context,
 			colIDs = append(colIDs, col.ID)
 			row = append(row, value)
 		}
+		rowToCheck = append(rowToCheck, value)
 		if shouldWriteBinlog(sctx, t.meta) && !t.canSkipUpdateBinlog(col, value) {
 			binlogColIDs = append(binlogColIDs, col.ID)
 			binlogOldRow = append(binlogOldRow, oldData[col.Offset])
 			binlogNewRow = append(binlogNewRow, value)
 		}
 	}
+
+	for _, constraint := range t.WritableConstraint() {
+		ok, isNull, err := constraint.ConstraintExpr.EvalInt(sctx, chunk.MutRowFromDatums(rowToCheck).ToRow())
+		if err != nil {
+			return err
+		}
+		if ok == 0 && !isNull {
+			return table.ErrCheckConstraintViolated.FastGenByArgs(constraint.Name.O)
+		}
+	}
+
 	sessVars := sctx.GetSessionVars()
 	// rebuild index
 	if !sessVars.InTxn() {
@@ -761,6 +814,7 @@ func (t *TableCommon) AddRecord(sctx sessionctx.Context, r []types.Datum, opts .
 
 	var colIDs, binlogColIDs []int64
 	var row, binlogRow []types.Datum
+	rowToCheck := make([]types.Datum, 0, len(r))
 	if recordCtx, ok := sctx.Value(addRecordCtxKey).(*CommonAddRecordCtx); ok {
 		colIDs = recordCtx.colIDs[:0]
 		row = recordCtx.row[:0]
@@ -812,9 +866,20 @@ func (t *TableCommon) AddRecord(sctx sessionctx.Context, r []types.Datum, opts .
 		} else {
 			value = r[col.Offset]
 		}
+		rowToCheck = append(rowToCheck, value)
 		if !t.canSkip(col, &value) {
 			colIDs = append(colIDs, col.ID)
 			row = append(row, value)
+		}
+	}
+
+	for _, constraint := range t.WritableConstraint() {
+		ok, isNull, err := constraint.ConstraintExpr.EvalInt(sctx, chunk.MutRowFromDatums(r).ToRow())
+		if err != nil {
+			return nil, err
+		}
+		if ok == 0 && !isNull {
+			return nil, table.ErrCheckConstraintViolated.FastGenByArgs(constraint.Name.O)
 		}
 	}
 

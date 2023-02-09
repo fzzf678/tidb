@@ -54,6 +54,8 @@ var (
 	ErrNonuniqTable = dbterror.ClassSchema.NewStd(mysql.ErrNonuniqTable)
 	// ErrMultiplePriKey returns for multiple primary keys.
 	ErrMultiplePriKey = dbterror.ClassSchema.NewStd(mysql.ErrMultiplePriKey)
+	// ErrCheckConstraintDupName returns for duplicate constraint names.
+	ErrCheckConstraintDupName = dbterror.ClassSchema.NewStd(mysql.ErrCheckConstraintDupName)
 	// ErrTooManyKeyParts returns for too many key parts.
 	ErrTooManyKeyParts = dbterror.ClassSchema.NewStd(mysql.ErrTooManyKeyParts)
 	// ErrForeignKeyNotExists returns for foreign key not exists.

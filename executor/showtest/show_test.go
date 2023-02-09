@@ -1563,6 +1563,40 @@ func TestShowClusterConfig(t *testing.T) {
 	require.EqualError(t, tk.QueryToErr("show config"), confErr.Error())
 }
 
+func TestShowCheckConstraint(t *testing.T) {
+	store := testkit.CreateMockStore(t)
+	tk := testkit.NewTestKit(t, store)
+	tk.MustExec("use test")
+
+	tk.MustExec("drop table if exists t")
+	// Create table with check constraint
+	tk.MustExec("create table t(a int check (a>1), b int, constraint my_constr check(a<10))")
+	tk.MustQuery("show create table t").Check(testkit.Rows("t CREATE TABLE `t` (\n" +
+		"  `a` int(11) DEFAULT NULL,\n" +
+		"  `b` int(11) DEFAULT NULL,\n" +
+		"CONSTRAINT `my_constr` CHECK ((`a` < 10)),\n" +
+		"CONSTRAINT `t_chk_1` CHECK ((`a` > 1))\n" +
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
+	// Alter table add constraint.
+	tk.MustExec("alter table t add constraint my_constr2 check (a<b) not enforced")
+	tk.MustQuery("show create table t").Check(testkit.Rows("t CREATE TABLE `t` (\n" +
+		"  `a` int(11) DEFAULT NULL,\n" +
+		"  `b` int(11) DEFAULT NULL,\n" +
+		"CONSTRAINT `my_constr` CHECK ((`a` < 10)),\n" +
+		"CONSTRAINT `t_chk_1` CHECK ((`a` > 1)),\n" +
+		"CONSTRAINT `my_constr2` CHECK ((`a` < `b`)) /*!80016 NOT ENFORCED */\n" +
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
+	// Alter table drop constraint.
+	tk.MustExec("alter table t drop constraint t_chk_1")
+	tk.MustQuery("show create table t").Check(testkit.Rows("t CREATE TABLE `t` (\n" +
+		"  `a` int(11) DEFAULT NULL,\n" +
+		"  `b` int(11) DEFAULT NULL,\n" +
+		"CONSTRAINT `my_constr` CHECK ((`a` < 10)),\n" +
+		"CONSTRAINT `my_constr2` CHECK ((`a` < `b`)) /*!80016 NOT ENFORCED */\n" +
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
+	tk.MustExec("drop table if exists t")
+}
+
 func TestInvisibleCoprCacheConfig(t *testing.T) {
 	store := testkit.CreateMockStore(t)
 	tk := testkit.NewTestKit(t, store)

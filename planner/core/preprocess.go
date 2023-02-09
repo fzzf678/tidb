@@ -682,6 +682,7 @@ func isConstraintKeyTp(constraints []*ast.Constraint, colDef *ast.ColumnDef) boo
 	for _, c := range constraints {
 		// ignore constraint check
 		if c.Tp == ast.ConstraintCheck {
+			// TODO
 			continue
 		}
 		if c.Keys[0].Expr != nil {

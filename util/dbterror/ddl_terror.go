@@ -298,6 +298,14 @@ var (
 	ErrAddColumnWithSequenceAsDefault = ClassDDL.NewStd(mysql.ErrAddColumnWithSequenceAsDefault)
 	// ErrUnsupportedExpressionIndex is returned when create an expression index without allow-expression-index.
 	ErrUnsupportedExpressionIndex = ClassDDL.NewStdErr(mysql.ErrUnsupportedDDLOperation, parser_mysql.Message(fmt.Sprintf(mysql.MySQLErrName[mysql.ErrUnsupportedDDLOperation].Raw, "creating expression index containing unsafe functions without allow-expression-index in config"), nil))
+	// ErrColumnCheckConstraintReferOther is returned when create column check constraint referring other column.
+	ErrColumnCheckConstraintReferOther = ClassDDL.NewStd(mysql.ErrColumnCheckConstraintReferencesOtherColumn)
+	// ErrTableCheckConstraintReferUnknown is returned when create table check constraint referring non-existing column.
+	ErrTableCheckConstraintReferUnknown = ClassDDL.NewStd(mysql.ErrTableCheckConstraintReferUnknown)
+	// ErrConstraintNotFound is returned for dropping a non-existent constraint.
+	ErrConstraintNotFound = ClassDDL.NewStd(mysql.ErrConstraintNotFound)
+	// ErrCheckConstraintIsViolated is returned for violating an existent check constraint.
+	ErrCheckConstraintIsViolated = ClassDDL.NewStd(mysql.ErrCheckConstraintViolated)
 	// ErrPartitionExchangePartTable is returned when exchange table partition with another table is partitioned.
 	ErrPartitionExchangePartTable = ClassDDL.NewStd(mysql.ErrPartitionExchangePartTable)
 	// ErrPartitionExchangeTempTable is returned when exchange table partition with a temporary table

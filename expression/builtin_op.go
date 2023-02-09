@@ -740,7 +740,6 @@ func (c *unaryNotFunctionClass) getFunction(ctx sessionctx.Context, args []Expre
 		sig = &builtinUnaryNotIntSig{bf}
 		sig.setPbCode(tipb.ScalarFuncSig_UnaryNotInt)
 	case types.ETJson:
-		ctx.GetSessionVars().StmtCtx.AppendWarning(errJSONInBooleanContext)
 		sig = &builtinUnaryNotJSONSig{bf}
 		sig.setPbCode(tipb.ScalarFuncSig_UnaryNotJSON)
 	default:
