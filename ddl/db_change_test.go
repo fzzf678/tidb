@@ -201,7 +201,7 @@ func TestAlterConstraintAddDrop(t *testing.T) {
 	var checkErr error
 	d := dom.DDL()
 	originalCallback := d.GetHook()
-	callback := &ddl.TestDDLCallback{}
+	callback := &callback.TestDDLCallback{}
 	onJobUpdatedExportedFunc := func(job *model.Job) {
 		if checkErr != nil {
 			return
