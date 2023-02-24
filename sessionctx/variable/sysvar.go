@@ -165,6 +165,10 @@ var defaultSysVars = []*SysVar{
 		s.AllowProjectionPushDown = TiDBOptOn(val)
 		return nil
 	}},
+	{Scope: ScopeGlobal | ScopeSession, Name: TiDBOptDeriveTopN, Value: BoolToOnOff(DefOptDeriveTopN), Type: TypeBool, SetSession: func(s *SessionVars, val string) error {
+		s.AllowDeriveTopN = TiDBOptOn(val)
+		return nil
+	}},
 	{Scope: ScopeGlobal | ScopeSession, Name: TiDBOptAggPushDown, Value: BoolToOnOff(DefOptAggPushDown), Type: TypeBool, SetSession: func(s *SessionVars, val string) error {
 		s.AllowAggPushDown = TiDBOptOn(val)
 		return nil
@@ -179,6 +183,10 @@ var defaultSysVars = []*SysVar{
 	}},
 	{Scope: ScopeGlobal | ScopeSession, Name: TiDBOpt3StageDistinctAgg, Value: BoolToOnOff(DefTiDB3StageDistinctAgg), Type: TypeBool, SetSession: func(s *SessionVars, val string) error {
 		s.Enable3StageDistinctAgg = TiDBOptOn(val)
+		return nil
+	}},
+	{Scope: ScopeGlobal | ScopeSession, Name: TiDBOptEnable3StageMultiDistinctAgg, Value: BoolToOnOff(DefTiDB3StageMultiDistinctAgg), Type: TypeBool, SetSession: func(s *SessionVars, val string) error {
+		s.Enable3StageMultiDistinctAgg = TiDBOptOn(val)
 		return nil
 	}},
 	{Scope: ScopeSession, Name: TiDBOptWriteRowID, Value: BoolToOnOff(DefOptWriteRowID), Type: TypeBool, SetSession: func(s *SessionVars, val string) error {
@@ -463,8 +471,10 @@ var defaultSysVars = []*SysVar{
 			oldVal, newVal := config.GetGlobalConfig().Instance.TiDBEnableDDL.Load(), TiDBOptOn(val)
 			if oldVal != newVal {
 				err := switchDDL(newVal)
+				if err != nil {
+					return err
+				}
 				config.GetGlobalConfig().Instance.TiDBEnableDDL.Store(newVal)
-				return err
 			}
 			return nil
 		},
@@ -1189,7 +1199,7 @@ var defaultSysVars = []*SysVar{
 			return BoolToOnOff(EnableHistoricalStatsForCapture.Load()), nil
 		},
 	},
-	{Scope: ScopeGlobal, Name: TiDBHistoricalStatsDuration, Value: DefTiDBHistoricalStatsDuration.String(), Type: TypeDuration, MinValue: int64(time.Minute * 10), MaxValue: uint64(time.Hour * 24 * 365),
+	{Scope: ScopeGlobal, Name: TiDBHistoricalStatsDuration, Value: DefTiDBHistoricalStatsDuration.String(), Type: TypeDuration, MinValue: int64(time.Second), MaxValue: uint64(time.Hour * 24 * 365),
 		GetGlobal: func(ctx context.Context, vars *SessionVars) (string, error) {
 			return HistoricalStatsDuration.Load().String(), nil
 		}, SetGlobal: func(ctx context.Context, vars *SessionVars, s string) error {
@@ -1202,14 +1212,14 @@ var defaultSysVars = []*SysVar{
 		}},
 
 	/* The system variables below have GLOBAL and SESSION scope  */
-	{Scope: ScopeGlobal | ScopeSession, Name: TiDBEnablePlanReplayerContinuesCapture, Value: BoolToOnOff(false), Type: TypeBool,
+	{Scope: ScopeGlobal | ScopeSession, Name: TiDBEnablePlanReplayerContinuousCapture, Value: BoolToOnOff(false), Type: TypeBool,
 		SetSession: func(s *SessionVars, val string) error {
 			historicalStatsEnabled, err := s.GlobalVarsAccessor.GetGlobalSysVar(TiDBEnableHistoricalStats)
 			if err != nil {
 				return err
 			}
 			if !TiDBOptOn(historicalStatsEnabled) && TiDBOptOn(val) {
-				return errors.Errorf("%v should be enabled before enabling %v", TiDBEnableHistoricalStats, TiDBEnablePlanReplayerContinuesCapture)
+				return errors.Errorf("%v should be enabled before enabling %v", TiDBEnableHistoricalStats, TiDBEnablePlanReplayerContinuousCapture)
 			}
 			s.EnablePlanReplayedContinuesCapture = TiDBOptOn(val)
 			return nil
@@ -1223,7 +1233,7 @@ var defaultSysVars = []*SysVar{
 				return "", err
 			}
 			if !TiDBOptOn(historicalStatsEnabled) && TiDBOptOn(s) {
-				return "", errors.Errorf("%v should be enabled before enabling %v", TiDBEnableHistoricalStats, TiDBEnablePlanReplayerContinuesCapture)
+				return "", errors.Errorf("%v should be enabled before enabling %v", TiDBEnableHistoricalStats, TiDBEnablePlanReplayerContinuousCapture)
 			}
 			return s, nil
 		},
@@ -2156,6 +2166,10 @@ var defaultSysVars = []*SysVar{
 		s.RangeMaxSize = TidbOptInt64(val, DefTiDBOptRangeMaxSize)
 		return nil
 	}},
+	{Scope: ScopeGlobal | ScopeSession, Name: TiDBOptAdvancedJoinHint, Value: BoolToOnOff(DefTiDBOptAdvancedJoinHint), Type: TypeBool, SetSession: func(s *SessionVars, val string) error {
+		s.EnableAdvancedJoinHint = TiDBOptOn(val)
+		return nil
+	}},
 	{Scope: ScopeGlobal | ScopeSession, Name: TiDBAnalyzePartitionConcurrency, Value: strconv.FormatInt(DefTiDBAnalyzePartitionConcurrency, 10),
 		MinValue: 1, MaxValue: uint64(config.GetGlobalConfig().Performance.AnalyzePartitionConcurrencyQuota), SetSession: func(s *SessionVars, val string) error {
 			s.AnalyzePartitionConcurrency = int(TidbOptInt64(val, DefTiDBAnalyzePartitionConcurrency))
@@ -2357,6 +2371,19 @@ var defaultSysVars = []*SysVar{
 		s.EnablePlanCacheForParamLimit = TiDBOptOn(val)
 		return nil
 	}},
+	{Scope: ScopeGlobal | ScopeSession, Name: TiDBEnableINLJoinInnerMultiPattern, Value: BoolToOnOff(false), Type: TypeBool,
+		SetSession: func(s *SessionVars, val string) error {
+			s.EnableINLJoinInnerMultiPattern = TiDBOptOn(val)
+			return nil
+		},
+		GetSession: func(s *SessionVars) (string, error) {
+			return BoolToOnOff(s.EnableINLJoinInnerMultiPattern), nil
+		},
+	},
+	{Scope: ScopeGlobal | ScopeSession, Name: TiDBEnablePlanCacheForSubquery, Value: BoolToOnOff(DefTiDBEnablePlanCacheForSubquery), Type: TypeBool, SetSession: func(s *SessionVars, val string) error {
+		s.EnablePlanCacheForSubquery = TiDBOptOn(val)
+		return nil
+	}},
 }
 
 // FeedbackProbability points to the FeedbackProbability in statistics package.
@@ -2485,7 +2512,7 @@ const (
 	PluginDir = "plugin_dir"
 	// PluginLoad is the name of 'plugin_load' system variable.
 	PluginLoad = "plugin_load"
-	// TiDBEnableDDL indicates whether the tidb-server runs DDL statements,
+	// TiDBEnableDDL indicates whether the tidb-server campaigns the DDL owner,
 	TiDBEnableDDL = "tidb_enable_ddl"
 	// Port is the name for 'port' system variable.
 	Port = "port"

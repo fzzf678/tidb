@@ -66,8 +66,10 @@ import (
 const notSpecified = -1
 
 var (
-	transactionDurationPessimisticRollback = metrics.TransactionDuration.WithLabelValues(metrics.LblPessimistic, metrics.LblRollback)
-	transactionDurationOptimisticRollback  = metrics.TransactionDuration.WithLabelValues(metrics.LblOptimistic, metrics.LblRollback)
+	transactionDurationPessimisticRollbackInternal = metrics.TransactionDuration.WithLabelValues(metrics.LblPessimistic, metrics.LblRollback, metrics.LblInternal)
+	transactionDurationPessimisticRollbackGeneral  = metrics.TransactionDuration.WithLabelValues(metrics.LblPessimistic, metrics.LblRollback, metrics.LblGeneral)
+	transactionDurationOptimisticRollbackInternal  = metrics.TransactionDuration.WithLabelValues(metrics.LblOptimistic, metrics.LblRollback, metrics.LblInternal)
+	transactionDurationOptimisticRollbackGeneral   = metrics.TransactionDuration.WithLabelValues(metrics.LblOptimistic, metrics.LblRollback, metrics.LblGeneral)
 )
 
 // SimpleExec represents simple statement executor.
@@ -814,10 +816,18 @@ func (e *SimpleExec) executeRollback(s *ast.RollbackStmt) error {
 	sessVars.SetInTxn(false)
 	if txn.Valid() {
 		duration := time.Since(sessVars.TxnCtx.CreateTime).Seconds()
-		if sessVars.TxnCtx.IsPessimistic {
-			transactionDurationPessimisticRollback.Observe(duration)
-		} else {
-			transactionDurationOptimisticRollback.Observe(duration)
+		isInternal := false
+		if internal := txn.GetOption(kv.RequestSourceInternal); internal != nil && internal.(bool) {
+			isInternal = true
+		}
+		if isInternal && sessVars.TxnCtx.IsPessimistic {
+			transactionDurationPessimisticRollbackInternal.Observe(duration)
+		} else if isInternal && !sessVars.TxnCtx.IsPessimistic {
+			transactionDurationOptimisticRollbackInternal.Observe(duration)
+		} else if !isInternal && sessVars.TxnCtx.IsPessimistic {
+			transactionDurationPessimisticRollbackGeneral.Observe(duration)
+		} else if !isInternal && !sessVars.TxnCtx.IsPessimistic {
+			transactionDurationOptimisticRollbackGeneral.Observe(duration)
 		}
 		sessVars.TxnCtx.ClearDelta()
 		return txn.Rollback()
@@ -2569,7 +2579,7 @@ func (e *SimpleExec) executeKillStmt(ctx context.Context, s *ast.KillStmt) error
 		return nil
 	}
 	if e.IsFromRemote {
-		logutil.BgLogger().Info("Killing connection in current instance redirected from remote TiDB", zap.Uint64("connID", s.ConnectionID), zap.Bool("query", s.Query),
+		logutil.BgLogger().Info("Killing connection in current instance redirected from remote TiDB", zap.Uint64("conn", s.ConnectionID), zap.Bool("query", s.Query),
 			zap.String("sourceAddr", e.ctx.GetSessionVars().SourceAddr.IP.String()))
 		sm.Kill(s.ConnectionID, s.Query)
 		return nil
@@ -2583,7 +2593,7 @@ func (e *SimpleExec) executeKillStmt(ctx context.Context, s *ast.KillStmt) error
 	}
 	if isTruncated {
 		message := "Kill failed: Received a 32bits truncated ConnectionID, expect 64bits. Please execute 'KILL [CONNECTION | QUERY] ConnectionID' to send a Kill without truncating ConnectionID."
-		logutil.BgLogger().Warn(message, zap.Uint64("connID", s.ConnectionID))
+		logutil.BgLogger().Warn(message, zap.Uint64("conn", s.ConnectionID))
 		// Notice that this warning cannot be seen if KILL is triggered by "CTRL-C" of mysql client,
 		//   as the KILL is sent by a new connection.
 		err := errors.New(message)
@@ -2641,7 +2651,7 @@ func killRemoteConn(ctx context.Context, sctx sessionctx.Context, connID *util.G
 	}
 
 	logutil.BgLogger().Info("Killed remote connection", zap.Uint64("serverID", connID.ServerID),
-		zap.Uint64("connID", connID.ID()), zap.Bool("query", query))
+		zap.Uint64("conn", connID.ID()), zap.Bool("query", query))
 	return err
 }
 

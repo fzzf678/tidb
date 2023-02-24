@@ -169,6 +169,20 @@ var (
 			Name:      "compact_partition_usage",
 			Help:      "Counter of compact table partition",
 		})
+	TelemetryReorganizePartitionCnt = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "tidb",
+			Subsystem: "telemetry",
+			Name:      "reorganize_partition_usage",
+			Help:      "Counter of alter table reorganize partition",
+		})
+	TelemetryDistReorgCnt = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "tidb",
+			Subsystem: "telemetry",
+			Name:      "distributed_reorg_count",
+			Help:      "Counter of usage of distributed reorg DDL tasks count",
+		})
 	TelemetryStoreBatchedQueryCnt = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "tidb",
@@ -297,6 +311,7 @@ type TablePartitionUsageCounter struct {
 	TablePartitionAddIntervalPartitionsCnt    int64 `json:"table_partition_add_interval_partitions_cnt"`
 	TablePartitionDropIntervalPartitionsCnt   int64 `json:"table_partition_drop_interval_partitions_cnt"`
 	TablePartitionComactCnt                   int64 `json:"table_TablePartitionComactCnt"`
+	TablePartitionReorganizePartitionCnt      int64 `json:"table_reorganize_partition_cnt"`
 }
 
 // ExchangePartitionUsageCounter records the usages of exchange partition.
@@ -335,22 +350,24 @@ func (c TablePartitionUsageCounter) Cal(rhs TablePartitionUsageCounter) TablePar
 		TablePartitionAddIntervalPartitionsCnt:    c.TablePartitionAddIntervalPartitionsCnt - rhs.TablePartitionAddIntervalPartitionsCnt,
 		TablePartitionDropIntervalPartitionsCnt:   c.TablePartitionDropIntervalPartitionsCnt - rhs.TablePartitionDropIntervalPartitionsCnt,
 		TablePartitionComactCnt:                   c.TablePartitionComactCnt - rhs.TablePartitionComactCnt,
+		TablePartitionReorganizePartitionCnt:      c.TablePartitionReorganizePartitionCnt - rhs.TablePartitionReorganizePartitionCnt,
 	}
 }
 
 // ResetTablePartitionCounter gets the TxnCommitCounter.
 func ResetTablePartitionCounter(pre TablePartitionUsageCounter) TablePartitionUsageCounter {
 	return TablePartitionUsageCounter{
-		TablePartitionCnt:                readCounter(TelemetryTablePartitionCnt),
-		TablePartitionListCnt:            readCounter(TelemetryTablePartitionListCnt),
-		TablePartitionRangeCnt:           readCounter(TelemetryTablePartitionRangeCnt),
-		TablePartitionHashCnt:            readCounter(TelemetryTablePartitionHashCnt),
-		TablePartitionRangeColumnsCnt:    readCounter(TelemetryTablePartitionRangeColumnsCnt),
-		TablePartitionRangeColumnsGt1Cnt: readCounter(TelemetryTablePartitionRangeColumnsGt1Cnt),
-		TablePartitionRangeColumnsGt2Cnt: readCounter(TelemetryTablePartitionRangeColumnsGt2Cnt),
-		TablePartitionRangeColumnsGt3Cnt: readCounter(TelemetryTablePartitionRangeColumnsGt3Cnt),
-		TablePartitionListColumnsCnt:     readCounter(TelemetryTablePartitionListColumnsCnt),
-		TablePartitionMaxPartitionsCnt:   mathutil.Max(readCounter(TelemetryTablePartitionMaxPartitionsCnt)-pre.TablePartitionMaxPartitionsCnt, pre.TablePartitionMaxPartitionsCnt),
+		TablePartitionCnt:                    readCounter(TelemetryTablePartitionCnt),
+		TablePartitionListCnt:                readCounter(TelemetryTablePartitionListCnt),
+		TablePartitionRangeCnt:               readCounter(TelemetryTablePartitionRangeCnt),
+		TablePartitionHashCnt:                readCounter(TelemetryTablePartitionHashCnt),
+		TablePartitionRangeColumnsCnt:        readCounter(TelemetryTablePartitionRangeColumnsCnt),
+		TablePartitionRangeColumnsGt1Cnt:     readCounter(TelemetryTablePartitionRangeColumnsGt1Cnt),
+		TablePartitionRangeColumnsGt2Cnt:     readCounter(TelemetryTablePartitionRangeColumnsGt2Cnt),
+		TablePartitionRangeColumnsGt3Cnt:     readCounter(TelemetryTablePartitionRangeColumnsGt3Cnt),
+		TablePartitionListColumnsCnt:         readCounter(TelemetryTablePartitionListColumnsCnt),
+		TablePartitionMaxPartitionsCnt:       mathutil.Max(readCounter(TelemetryTablePartitionMaxPartitionsCnt)-pre.TablePartitionMaxPartitionsCnt, pre.TablePartitionMaxPartitionsCnt),
+		TablePartitionReorganizePartitionCnt: readCounter(TelemetryReorganizePartitionCnt),
 	}
 }
 
@@ -371,6 +388,7 @@ func GetTablePartitionCounter() TablePartitionUsageCounter {
 		TablePartitionAddIntervalPartitionsCnt:    readCounter(TelemetryTablePartitionAddIntervalPartitionsCnt),
 		TablePartitionDropIntervalPartitionsCnt:   readCounter(TelemetryTablePartitionDropIntervalPartitionsCnt),
 		TablePartitionComactCnt:                   readCounter(TelemetryCompactPartitionCnt),
+		TablePartitionReorganizePartitionCnt:      readCounter(TelemetryReorganizePartitionCnt),
 	}
 }
 
@@ -401,7 +419,7 @@ func GetNonTransactionalStmtCounter() NonTransactionalStmtCounter {
 
 // GetSavepointStmtCounter gets the savepoint statement executed counter.
 func GetSavepointStmtCounter() int64 {
-	return readCounter(StmtNodeCounter.With(prometheus.Labels{LblType: "Savepoint"}))
+	return readCounter(StmtNodeCounter.With(prometheus.Labels{LblType: "Savepoint", LblDb: ""}))
 }
 
 // GetLazyPessimisticUniqueCheckSetCounter returns the counter of setting tidb_constraint_check_in_place_pessimistic to false.
@@ -414,6 +432,7 @@ type DDLUsageCounter struct {
 	AddIndexIngestUsed   int64 `json:"add_index_ingest_used"`
 	MetadataLockUsed     bool  `json:"metadata_lock_used"`
 	FlashbackClusterUsed int64 `json:"flashback_cluster_used"`
+	DistReorgUsed        int64 `json:"dist_reorg_used"`
 }
 
 // Sub returns the difference of two counters.
@@ -421,6 +440,7 @@ func (a DDLUsageCounter) Sub(rhs DDLUsageCounter) DDLUsageCounter {
 	return DDLUsageCounter{
 		AddIndexIngestUsed:   a.AddIndexIngestUsed - rhs.AddIndexIngestUsed,
 		FlashbackClusterUsed: a.FlashbackClusterUsed - rhs.FlashbackClusterUsed,
+		DistReorgUsed:        a.DistReorgUsed - rhs.DistReorgUsed,
 	}
 }
 
@@ -429,6 +449,7 @@ func GetDDLUsageCounter() DDLUsageCounter {
 	return DDLUsageCounter{
 		AddIndexIngestUsed:   readCounter(TelemetryAddIndexIngestCnt),
 		FlashbackClusterUsed: readCounter(TelemetryFlashbackClusterCnt),
+		DistReorgUsed:        readCounter(TelemetryDistReorgCnt),
 	}
 }
 
@@ -482,5 +503,27 @@ func GetStoreBatchCoprCounter() StoreBatchCoprCounter {
 		BatchedQueryTask:     readCounter(TelemetryBatchedQueryTaskCnt),
 		BatchedCount:         readCounter(TelemetryStoreBatchedCnt),
 		BatchedFallbackCount: readCounter(TelemetryStoreBatchedFallbackCnt),
+	}
+}
+
+// AggressiveLockingUsageCounter records the usage of Aggressive Locking feature of pessimistic transaction.
+type AggressiveLockingUsageCounter struct {
+	TxnAggressiveLockingUsed      int64 `json:"txn_aggressive_locking_used"`
+	TxnAggressiveLockingEffective int64 `json:"txn_aggressive_locking_effective"`
+}
+
+// Sub returns the difference of two counters.
+func (i AggressiveLockingUsageCounter) Sub(rhs AggressiveLockingUsageCounter) AggressiveLockingUsageCounter {
+	return AggressiveLockingUsageCounter{
+		TxnAggressiveLockingUsed:      i.TxnAggressiveLockingUsed - rhs.TxnAggressiveLockingUsed,
+		TxnAggressiveLockingEffective: i.TxnAggressiveLockingEffective - rhs.TxnAggressiveLockingEffective,
+	}
+}
+
+// GetAggressiveLockingUsageCounter returns the Aggressive Locking usage counter.
+func GetAggressiveLockingUsageCounter() AggressiveLockingUsageCounter {
+	return AggressiveLockingUsageCounter{
+		TxnAggressiveLockingUsed:      readCounter(AggressiveLockingUsageCount.WithLabelValues(LblAggressiveLockingTxnUsed)),
+		TxnAggressiveLockingEffective: readCounter(AggressiveLockingUsageCount.WithLabelValues(LblAggressiveLockingTxnEffective)),
 	}
 }

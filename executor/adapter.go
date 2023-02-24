@@ -87,6 +87,17 @@ var (
 	selectForUpdateRetryDuration        = metrics.PessimisticDMLDurationByAttempt.WithLabelValues("select-for-update", "retry")
 	dmlFirstAttemptDuration             = metrics.PessimisticDMLDurationByAttempt.WithLabelValues("dml", "first-attempt")
 	dmlRetryDuration                    = metrics.PessimisticDMLDurationByAttempt.WithLabelValues("dml", "retry")
+
+	// aggressiveLockingTxnUsedCount counts transactions where at least one statement has aggressive locking enabled.
+	aggressiveLockingTxnUsedCount = metrics.AggressiveLockingUsageCount.WithLabelValues(metrics.LblAggressiveLockingTxnUsed)
+	// aggressiveLockingStmtUsedCount counts statements that have aggressive locking enabled.
+	aggressiveLockingStmtUsedCount = metrics.AggressiveLockingUsageCount.WithLabelValues(metrics.LblAggressiveLockingStmtUsed)
+	// aggressiveLockingTxnUsedCount counts transactions where at least one statement has aggressive locking enabled,
+	// and it takes effect (which is determined according to whether lock-with-conflict has occurred during execution).
+	aggressiveLockingTxnEffectiveCount = metrics.AggressiveLockingUsageCount.WithLabelValues(metrics.LblAggressiveLockingTxnEffective)
+	// aggressiveLockingTxnUsedCount counts statements where at least one statement has aggressive locking enabled,
+	// and it takes effect (which is determined according to whether lock-with-conflict has occurred during execution).
+	aggressiveLockingStmtEffectiveCount = metrics.AggressiveLockingUsageCount.WithLabelValues(metrics.LblAggressiveLockingStmtEffective)
 )
 
 // processinfoSetter is the interface use to set current running process info.
@@ -203,12 +214,12 @@ type TelemetryInfo struct {
 	UseNonRecursive       bool
 	UseRecursive          bool
 	UseMultiSchemaChange  bool
-	UesExchangePartition  bool
+	UseExchangePartition  bool
 	UseFlashbackToCluster bool
 	PartitionTelemetry    *PartitionTelemetryInfo
 	AccountLockTelemetry  *AccountLockTelemetryInfo
 	UseIndexMerge         bool
-	UseTableLookUp        bool
+	UseTableLookUp        atomic.Bool
 }
 
 // PartitionTelemetryInfo records table partition telemetry information during execution.
@@ -227,6 +238,7 @@ type PartitionTelemetryInfo struct {
 	UseAddIntervalPartition          bool
 	UseDropIntervalPartition         bool
 	UseCompactTablePartition         bool
+	UseReorganizePartition           bool
 }
 
 // AccountLockTelemetryInfo records account lock/unlock information during execution
@@ -451,6 +463,18 @@ func (a *ExecStmt) Exec(ctx context.Context) (_ sqlexec.RecordSet, err error) {
 			lockKeysCnt := a.Ctx.GetSessionVars().StmtCtx.LockKeysCount
 			if lockKeysCnt > 0 {
 				metrics.StatementLockKeysCount.Observe(float64(lockKeysCnt))
+			}
+
+			execDetails := a.Ctx.GetSessionVars().StmtCtx.GetExecDetails()
+			if err == nil && execDetails.LockKeysDetail != nil &&
+				(execDetails.LockKeysDetail.AggressiveLockNewCount > 0 || execDetails.LockKeysDetail.AggressiveLockDerivedCount > 0) {
+				a.Ctx.GetSessionVars().TxnCtx.AggressiveLockingUsed = true
+				// If this statement is finished when some of the keys are locked with conflict in the last retry, or
+				// some of the keys are derived from the previous retry, we consider the optimization of aggressive locking
+				// takes effect on this statement.
+				if execDetails.LockKeysDetail.LockedWithConflictCount > 0 || execDetails.LockKeysDetail.AggressiveLockDerivedCount > 0 {
+					a.Ctx.GetSessionVars().TxnCtx.AggressiveLockingEffective = true
+				}
 			}
 			return
 		}
@@ -1471,6 +1495,28 @@ func (a *ExecStmt) FinishExecuteStmt(txnTS uint64, err error, hasMoreResults boo
 
 	if sessVars.StmtCtx.ReadFromTableCache {
 		metrics.ReadFromTableCacheCounter.Inc()
+	}
+
+	// Update aggressive locking related counters by stmt
+	if execDetail.LockKeysDetail != nil {
+		if execDetail.LockKeysDetail.AggressiveLockNewCount > 0 || execDetail.LockKeysDetail.AggressiveLockDerivedCount > 0 {
+			aggressiveLockingStmtUsedCount.Inc()
+			// If this statement is finished when some of the keys are locked with conflict in the last retry, or
+			// some of the keys are derived from the previous retry, we consider the optimization of aggressive locking
+			// takes effect on this statement.
+			if execDetail.LockKeysDetail.LockedWithConflictCount > 0 || execDetail.LockKeysDetail.AggressiveLockDerivedCount > 0 {
+				aggressiveLockingStmtEffectiveCount.Inc()
+			}
+		}
+	}
+	// If the transaction is committed, update aggressive locking related counters by txn
+	if execDetail.CommitDetail != nil {
+		if sessVars.TxnCtx.AggressiveLockingUsed {
+			aggressiveLockingTxnUsedCount.Inc()
+		}
+		if sessVars.TxnCtx.AggressiveLockingEffective {
+			aggressiveLockingTxnEffectiveCount.Inc()
+		}
 	}
 }
 

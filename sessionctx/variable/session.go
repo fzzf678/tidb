@@ -240,6 +240,14 @@ type TxnCtxNoNeedToRestore struct {
 	EnableMDL bool
 	// relatedTableForMDL records the `lock` table for metadata lock. It maps from int64 to int64(version).
 	relatedTableForMDL *sync.Map
+
+	// AggressiveLockingUsed marking whether at least one of the statements in the transaction was executed in
+	// aggressive locking mode.
+	AggressiveLockingUsed bool
+	// AggressiveLockingEffective marking whether at least one of the statements in the transaction was executed in
+	// aggressive locking mode, and it takes effect (which is determined according to whether lock-with-conflict
+	// has occurred during execution of any statement).
+	AggressiveLockingEffective bool
 }
 
 // SavepointRecord indicates a transaction's savepoint record.
@@ -753,6 +761,9 @@ type SessionVars struct {
 	// AllowAggPushDown can be set to false to forbid aggregation push down.
 	AllowAggPushDown bool
 
+	// AllowDeriveTopN is used to enable/disable derived TopN optimization.
+	AllowDeriveTopN bool
+
 	// AllowCartesianBCJ means allow broadcast CARTESIAN join, 0 means not allow, 1 means allow broadcast CARTESIAN join
 	// but the table size should under the broadcast threshold, 2 means allow broadcast CARTESIAN join even if the table
 	// size exceeds the broadcast threshold
@@ -769,6 +780,9 @@ type SessionVars struct {
 
 	// Enable3StageDistinctAgg indicates whether to allow 3 stage distinct aggregate
 	Enable3StageDistinctAgg bool
+
+	// Enable3StageMultiDistinctAgg indicates whether to allow 3 stage multi distinct aggregate
+	Enable3StageMultiDistinctAgg bool
 
 	// MultiStatementMode permits incorrect client library usage. Not recommended to be turned on.
 	MultiStatementMode int
@@ -1268,6 +1282,9 @@ type SessionVars struct {
 	// EnablePlanCacheForParamLimit controls whether the prepare statement with parameterized limit can be cached
 	EnablePlanCacheForParamLimit bool
 
+	// EnablePlanCacheForSubquery controls whether the prepare statement with sub query can be cached
+	EnablePlanCacheForSubquery bool
+
 	// EnableNonPreparedPlanCache indicates whether to enable non-prepared plan cache.
 	EnableNonPreparedPlanCache bool
 
@@ -1320,6 +1337,9 @@ type SessionVars struct {
 	// EnableReuseCheck indicates  request chunk whether use chunk alloc
 	EnableReuseCheck bool
 
+	// EnableAdvancedJoinHint indicates whether the join method hint is compatible with join order hint.
+	EnableAdvancedJoinHint bool
+
 	// preuseChunkAlloc indicates whether pre statement use chunk alloc
 	// like select @@last_sql_use_alloc
 	preUseChunkAlloc bool
@@ -1350,9 +1370,9 @@ type SessionVars struct {
 	// is enabled.
 	PessimisticTransactionAggressiveLocking bool
 
-	// EnableIndexJoinInnerSideMultiPattern indicates whether enable multi pattern for index join inner side
+	// EnableINLJoinInnerMultiPattern indicates whether enable multi pattern for index join inner side
 	// For now it is not public to user
-	EnableIndexJoinInnerSideMultiPattern bool
+	EnableINLJoinInnerMultiPattern bool
 }
 
 // planReplayerSessionFinishedTaskKeyLen is used to control the max size for the finished plan replayer task key in session
@@ -1417,6 +1437,16 @@ func (s *SessionVars) SetAlloc(alloc chunk.Allocator) {
 		return
 	}
 	s.ChunkPool.Alloc = alloc
+}
+
+// IsAllocValid check if chunk reuse is enable or ChunkPool is inused.
+func (s *SessionVars) IsAllocValid() bool {
+	if !s.EnableReuseCheck {
+		return false
+	}
+	s.ChunkPool.mu.Lock()
+	defer s.ChunkPool.mu.Unlock()
+	return s.ChunkPool.Alloc != nil
 }
 
 // ClearAlloc indicates stop reuse chunk

@@ -31,7 +31,7 @@ dev: checklist check explaintest gogenerate br_unit_test test_part_parser_dev ut
 # Install the check tools.
 check-setup:tools/bin/revive
 
-check: parser_yacc check-parallel lint tidy testSuite errdoc license check-bazel-prepare
+check: check-bazel-prepare parser_yacc check-parallel lint tidy testSuite errdoc license
 
 fmt:
 	@echo "gofmt (simplify)"
@@ -403,27 +403,28 @@ check-bazel-prepare:
 	@echo "make bazel_prepare"
 	./tools/check/check-bazel-prepare.sh
 
-bazel_test: failpoint-enable bazel_ci_prepare
-	bazel $(BAZEL_GLOBAL_CONFIG) test $(BAZEL_CMD_CONFIG) \
+bazel_test: failpoint-enable bazel_prepare
+	bazel $(BAZEL_GLOBAL_CONFIG) test $(BAZEL_CMD_CONFIG) --build_tests_only --test_keep_going=false \
+		--define gotags=deadlock,intest \
 		-- //... -//cmd/... -//tests/graceshutdown/... \
-		-//tests/globalkilltest/... -//tests/readonlytest/... -//br/pkg/task:task_test
+		-//tests/globalkilltest/... -//tests/readonlytest/... -//br/pkg/task:task_test -//tests/realtikvtest/...
 
 
-bazel_coverage_test: failpoint-enable bazel_ci_prepare
-	bazel $(BAZEL_GLOBAL_CONFIG) --nohome_rc coverage $(BAZEL_CMD_CONFIG) --local_ram_resources=30720 --jobs=25 \
+bazel_coverage_test: check-bazel-prepare failpoint-enable bazel_ci_prepare
+	bazel $(BAZEL_GLOBAL_CONFIG) coverage $(BAZEL_CMD_CONFIG) --build_tests_only --test_keep_going=false \
 		--@io_bazel_rules_go//go/config:cover_format=go_cover --define gotags=deadlock,intest \
 		-- //... -//cmd/... -//tests/graceshutdown/... \
 		-//tests/globalkilltest/... -//tests/readonlytest/... -//br/pkg/task:task_test -//tests/realtikvtest/...
-	bazel $(BAZEL_GLOBAL_CONFIG) --nohome_rc coverage $(BAZEL_CMD_CONFIG) --local_ram_resources=30720 --jobs=25 \
+	bazel $(BAZEL_GLOBAL_CONFIG) coverage $(BAZEL_CMD_CONFIG) --build_tests_only --test_keep_going=false \
 		--@io_bazel_rules_go//go/config:cover_format=go_cover --define gotags=deadlock,intest,distributereorg \
 		-- //... -//cmd/... -//tests/graceshutdown/... \
 		-//tests/globalkilltest/... -//tests/readonlytest/... -//br/pkg/task:task_test -//tests/realtikvtest/...
 
 bazel_build: bazel_ci_prepare
 	mkdir -p bin
-	bazel $(BAZEL_GLOBAL_CONFIG) --nohome_rc build $(BAZEL_CMD_CONFIG) --local_ram_resources=61440 --jobs=25 \
+	bazel $(BAZEL_GLOBAL_CONFIG) build $(BAZEL_CMD_CONFIG) \
 		//... --//build:with_nogo_flag=true
-	bazel $(BAZEL_GLOBAL_CONFIG) --nohome_rc build $(BAZEL_CMD_CONFIG) \
+	bazel $(BAZEL_GLOBAL_CONFIG) build $(BAZEL_CMD_CONFIG) \
 		//cmd/importer:importer //tidb-server:tidb-server //tidb-server:tidb-server-check --//build:with_nogo_flag=true
 	cp bazel-out/k8-fastbuild/bin/tidb-server/tidb-server_/tidb-server ./bin
 	cp bazel-out/k8-fastbuild/bin/cmd/importer/importer_/importer      ./bin
