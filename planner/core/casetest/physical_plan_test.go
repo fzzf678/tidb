@@ -263,6 +263,9 @@ func TestDAGPlanBuilderBasePhysicalPlan(t *testing.T) {
 
 		err = core.Preprocess(context.Background(), se, stmt, core.WithPreprocessorReturn(&core.PreprocessorReturn{InfoSchema: is}))
 		require.NoError(t, err)
+		if i == 13 {
+			fmt.Println("sss", i)
+		}
 		p, _, err := planner.Optimize(context.TODO(), se, stmt, is)
 		require.NoError(t, err)
 		testdata.OnRecord(func() {

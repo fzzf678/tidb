@@ -328,6 +328,8 @@ func TestSelectWithoutFrom(t *testing.T) {
 func TestSelectBackslashN(t *testing.T) {
 	store := testkit.CreateMockStore(t)
 	tk := testkit.NewTestKit(t, store)
+	//tk.MustQuery("select @@session.tidb_enable_non_prepared_plan_cache").Check(testkit.Rows("1"))
+	//tk.MustExec("set @@session.tidb_enable_non_prepared_plan_cache = 0")
 
 	sql := `select \N;`
 	tk.MustQuery(sql).Check(testkit.Rows("<nil>"))
@@ -398,6 +400,16 @@ func TestSelectBackslashN(t *testing.T) {
 	require.NoError(t, rs.Close())
 
 	sql = `select '\N' from test;`
+	tk.MustExec("set @@session.tidb_enable_non_prepared_plan_cache = 0")
+	tk.MustQuery(sql).Check(testkit.Rows("N"))
+	rs, err = tk.Exec(sql)
+	require.NoError(t, err)
+	fields = rs.Fields()
+	require.Len(t, fields, 1)
+	require.Equal(t, `N`, fields[0].Column.Name.O)
+	require.NoError(t, rs.Close())
+
+	tk.MustExec("set @@session.tidb_enable_non_prepared_plan_cache = 1")
 	tk.MustQuery(sql).Check(testkit.Rows("N"))
 	rs, err = tk.Exec(sql)
 	require.NoError(t, err)
