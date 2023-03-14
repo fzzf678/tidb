@@ -1297,3 +1297,16 @@ func TestNonPreparedPlanCacheExplain(t *testing.T) {
 		tk.MustQuery("show warnings").Check(testkit.Rows())
 	}
 }
+
+func TestIssue42150(t *testing.T) {
+	store := testkit.CreateMockStore(t)
+	tk := testkit.NewTestKit(t, store)
+	tk.MustExec(`use test`)
+	tk.MustExec("drop table if exists t1, t2")
+	tk.MustExec("CREATE TABLE `t1` (`c_int` int(11) NOT NULL,  `c_str` varchar(40) CHARACTER SET utf8 COLLATE utf8_bin DEFAULT NULL,  `c_datetime` datetime DEFAULT NULL,  `c_timestamp` timestamp NULL DEFAULT NULL,  `c_double` double DEFAULT NULL,  `c_decimal` decimal(12,6) DEFAULT NULL,  `c_enum` enum('blue','green','red','yellow','white','orange','purple') NOT NULL,  PRIMARY KEY (`c_int`,`c_enum`) /*T![clustered_index] CLUSTERED */,  KEY `c_decimal` (`c_decimal`),  UNIQUE KEY `c_datetime` (`c_datetime`),  UNIQUE KEY `c_timestamp` (`c_timestamp`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;")
+	tk.MustExec("CREATE TABLE `t2` (`c_int` int(11) NOT NULL,  `c_str` varchar(40) CHARACTER SET utf8 COLLATE utf8_bin DEFAULT NULL,  `c_datetime` datetime DEFAULT NULL,  `c_timestamp` timestamp NULL DEFAULT NULL,  `c_double` double DEFAULT NULL,  `c_decimal` decimal(12,6) DEFAULT NULL,  `c_enum` enum('blue','green','red','yellow','white','orange','purple') NOT NULL,  PRIMARY KEY (`c_int`,`c_enum`) /*T![clustered_index] CLUSTERED */,  KEY `c_decimal` (`c_decimal`),  UNIQUE KEY `c_datetime` (`c_datetime`),  UNIQUE KEY `c_timestamp` (`c_timestamp`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;")
+	tk.MustExec("set @v0 = 'nice hellman', @v1 = 'flamboyant booth', @v2 = 'quirky brahmagupta'")
+	tk.MustExec("prepare stmt16 from 'select * from t1 where c_enum in (select c_enum from t2 where t1.c_str in (?, ?, ?))'")
+	tk.MustExec("execute stmt16 using @v0, @v1, @v2;")
+	tk.MustExec("execute stmt16 using @v0, @v1, @v2;")
+}
