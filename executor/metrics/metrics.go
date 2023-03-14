@@ -52,16 +52,16 @@ var (
 	DmlFirstAttemptDuration             prometheus.Observer
 	DmlRetryDuration                    prometheus.Observer
 
-	// FairLockingTxnUsedCount counts transactions where at least one statement has fair locking enabled.
-	FairLockingTxnUsedCount prometheus.Counter
-	// FairLockingStmtUsedCount counts statements that have fair locking enabled.
-	FairLockingStmtUsedCount prometheus.Counter
-	// FairLockingTxnEffectiveCount counts transactions where at least one statement has fair locking enabled,
+	// AggressiveLockingTxnUsedCount counts transactions where at least one statement has aggressive locking enabled.
+	AggressiveLockingTxnUsedCount prometheus.Counter
+	// AggressiveLockingStmtUsedCount counts statements that have aggressive locking enabled.
+	AggressiveLockingStmtUsedCount prometheus.Counter
+	// AggressiveLockingTxnUsedCount counts transactions where at least one statement has aggressive locking enabled,
 	// and it takes effect (which is determined according to whether lock-with-conflict has occurred during execution).
-	FairLockingTxnEffectiveCount prometheus.Counter
-	// FairLockingStmtEffectiveCount counts statements where at least one statement has fair locking enabled,
+	AggressiveLockingTxnEffectiveCount prometheus.Counter
+	// AggressiveLockingTxnUsedCount counts statements where at least one statement has aggressive locking enabled,
 	// and it takes effect (which is determined according to whether lock-with-conflict has occurred during execution).
-	FairLockingStmtEffectiveCount prometheus.Counter
+	AggressiveLockingStmtEffectiveCount prometheus.Counter
 
 	FastAnalyzeHistogramSample        prometheus.Observer
 	FastAnalyzeHistogramAccessRegions prometheus.Observer
@@ -146,10 +146,10 @@ func InitMetricsVars() {
 	DmlFirstAttemptDuration = metrics.PessimisticDMLDurationByAttempt.WithLabelValues("dml", "first-attempt")
 	DmlRetryDuration = metrics.PessimisticDMLDurationByAttempt.WithLabelValues("dml", "retry")
 
-	FairLockingTxnUsedCount = metrics.FairLockingUsageCount.WithLabelValues(metrics.LblFairLockingTxnUsed)
-	FairLockingStmtUsedCount = metrics.FairLockingUsageCount.WithLabelValues(metrics.LblFairLockingStmtUsed)
-	FairLockingTxnEffectiveCount = metrics.FairLockingUsageCount.WithLabelValues(metrics.LblFairLockingTxnEffective)
-	FairLockingStmtEffectiveCount = metrics.FairLockingUsageCount.WithLabelValues(metrics.LblFairLockingStmtEffective)
+	AggressiveLockingTxnUsedCount = metrics.AggressiveLockingUsageCount.WithLabelValues(metrics.LblAggressiveLockingTxnUsed)
+	AggressiveLockingStmtUsedCount = metrics.AggressiveLockingUsageCount.WithLabelValues(metrics.LblAggressiveLockingStmtUsed)
+	AggressiveLockingTxnEffectiveCount = metrics.AggressiveLockingUsageCount.WithLabelValues(metrics.LblAggressiveLockingTxnEffective)
+	AggressiveLockingStmtEffectiveCount = metrics.AggressiveLockingUsageCount.WithLabelValues(metrics.LblAggressiveLockingStmtEffective)
 
 	FastAnalyzeHistogramSample = metrics.FastAnalyzeHistogram.WithLabelValues(metrics.LblGeneral, "sample")
 	FastAnalyzeHistogramAccessRegions = metrics.FastAnalyzeHistogram.WithLabelValues(metrics.LblGeneral, "access_regions")

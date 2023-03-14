@@ -249,11 +249,11 @@ func (p *PessimisticRRTxnContextProvider) handleAfterPessimisticLockError(ctx co
 			zap.Stringer("lockKey", kv.Key(deadlock.LockKey)),
 			zap.Uint64("deadlockKeyHash", deadlock.DeadlockKeyHash))
 
-		// In fair locking mode, when statement retry happens, `retryFairLockingIfNeeded` should be
+		// In aggressive locking mode, when statement retry happens, `retryAggressiveLockingIfNeeded` should be
 		// called to make its state ready for retrying. But single-statement deadlock is an exception. We need to exit
-		// fair locking in single-statement-deadlock case, otherwise the lock this statement has acquired won't be
+		// aggressive locking in single-statement-deadlock case, otherwise the lock this statement has acquired won't be
 		// released after retrying, so it still blocks another transaction and the deadlock won't be resolved.
-		if err := p.cancelFairLockingIfNeeded(ctx); err != nil {
+		if err := p.cancelAggressiveLockingIfNeeded(ctx); err != nil {
 			return sessiontxn.ErrorAction(err)
 		}
 	} else if terror.ErrorEqual(kv.ErrWriteConflict, lockErr) {
@@ -289,7 +289,7 @@ func (p *PessimisticRRTxnContextProvider) handleAfterPessimisticLockError(ctx co
 		return sessiontxn.ErrorAction(lockErr)
 	}
 
-	if err := p.retryFairLockingIfNeeded(ctx); err != nil {
+	if err := p.retryAggressiveLockingIfNeeded(ctx); err != nil {
 		return sessiontxn.ErrorAction(err)
 	}
 	return sessiontxn.RetryReady()

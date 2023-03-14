@@ -76,13 +76,13 @@ func TestTxnUsageInfo(t *testing.T) {
 		txnUsage = telemetry.GetTxnUsageInfo(tk.Session())
 		require.True(t, txnUsage.RCWriteCheckTS)
 
-		tk.MustExec(fmt.Sprintf("set global %s = 0", variable.TiDBPessimisticTransactionFairLocking))
+		tk.MustExec(fmt.Sprintf("set global %s = 0", variable.TiDBPessimisticTransactionAggressiveLocking))
 		txnUsage = telemetry.GetTxnUsageInfo(tk.Session())
-		require.False(t, txnUsage.FairLocking)
+		require.False(t, txnUsage.AggressiveLocking)
 
-		tk.MustExec(fmt.Sprintf("set global %s = 1", variable.TiDBPessimisticTransactionFairLocking))
+		tk.MustExec(fmt.Sprintf("set global %s = 1", variable.TiDBPessimisticTransactionAggressiveLocking))
 		txnUsage = telemetry.GetTxnUsageInfo(tk.Session())
-		require.True(t, txnUsage.FairLocking)
+		require.True(t, txnUsage.AggressiveLocking)
 	})
 
 	t.Run("Count", func(t *testing.T) {
@@ -894,7 +894,7 @@ func TestStoreBatchCopr(t *testing.T) {
 	require.Equal(t, diff.BatchedFallbackCount, int64(1))
 }
 
-func TestFairLockingUsage(t *testing.T) {
+func TestAggressiveLockingUsage(t *testing.T) {
 	store := testkit.CreateMockStore(t)
 	tk := testkit.NewTestKit(t, store)
 	tk2 := testkit.NewTestKit(t, store)
@@ -905,24 +905,24 @@ func TestFairLockingUsage(t *testing.T) {
 
 	usage, err := telemetry.GetFeatureUsage(tk2.Session())
 	require.NoError(t, err)
-	require.Equal(t, int64(0), usage.Txn.FairLockingUsageCounter.TxnFairLockingUsed)
-	require.Equal(t, int64(0), usage.Txn.FairLockingUsageCounter.TxnFairLockingEffective)
+	require.Equal(t, int64(0), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingUsed)
+	require.Equal(t, int64(0), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingEffective)
 
-	tk.MustExec("set @@tidb_pessimistic_txn_fair_locking = 1")
+	tk.MustExec("set @@tidb_pessimistic_txn_aggressive_locking = 1")
 
 	tk.MustExec("begin pessimistic")
 	tk.MustExec("update t set v = v + 1 where id = 1")
 	usage, err = telemetry.GetFeatureUsage(tk2.Session())
 	// Not counted before transaction committing.
 	require.NoError(t, err)
-	require.Equal(t, int64(0), usage.Txn.FairLockingUsageCounter.TxnFairLockingUsed)
-	require.Equal(t, int64(0), usage.Txn.FairLockingUsageCounter.TxnFairLockingEffective)
+	require.Equal(t, int64(0), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingUsed)
+	require.Equal(t, int64(0), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingEffective)
 
 	tk.MustExec("commit")
 	usage, err = telemetry.GetFeatureUsage(tk2.Session())
 	require.NoError(t, err)
-	require.Equal(t, int64(1), usage.Txn.FairLockingUsageCounter.TxnFairLockingUsed)
-	require.Equal(t, int64(0), usage.Txn.FairLockingUsageCounter.TxnFairLockingEffective)
+	require.Equal(t, int64(1), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingUsed)
+	require.Equal(t, int64(0), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingEffective)
 
 	// Counted by transaction instead of by statement.
 	tk.MustExec("begin pessimistic")
@@ -931,8 +931,8 @@ func TestFairLockingUsage(t *testing.T) {
 	tk.MustExec("commit")
 	usage, err = telemetry.GetFeatureUsage(tk2.Session())
 	require.NoError(t, err)
-	require.Equal(t, int64(2), usage.Txn.FairLockingUsageCounter.TxnFairLockingUsed)
-	require.Equal(t, int64(0), usage.Txn.FairLockingUsageCounter.TxnFairLockingEffective)
+	require.Equal(t, int64(2), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingUsed)
+	require.Equal(t, int64(0), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingEffective)
 
 	// Effective only when LockedWithConflict occurs.
 	tk3 := testkit.NewTestKit(t, store)
@@ -959,6 +959,6 @@ func TestFairLockingUsage(t *testing.T) {
 	tk.MustExec("commit")
 	usage, err = telemetry.GetFeatureUsage(tk2.Session())
 	require.NoError(t, err)
-	require.Equal(t, int64(4), usage.Txn.FairLockingUsageCounter.TxnFairLockingUsed)
-	require.Equal(t, int64(1), usage.Txn.FairLockingUsageCounter.TxnFairLockingEffective)
+	require.Equal(t, int64(3), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingUsed)
+	require.Equal(t, int64(1), usage.Txn.AggressiveLockingUsageCounter.TxnAggressiveLockingEffective)
 }

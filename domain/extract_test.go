@@ -93,6 +93,7 @@ func closeStmtSummary() {
 		conf.Instance.StmtSummaryEnablePersistent = false
 	})
 	stmtsummaryv2.GlobalStmtSummary.Close()
+	stmtsummaryv2.GlobalStmtSummary = nil
 	_ = os.Remove(config.GetGlobalConfig().Instance.StmtSummaryFilename)
 }
 

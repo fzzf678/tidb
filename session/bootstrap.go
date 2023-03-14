@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/bindinfo"
 	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/ddl"
@@ -2592,9 +2593,13 @@ func doDMLWorks(s Session) {
 			vVal = variable.AssertionFastStr
 		case variable.TiDBEnableMutationChecker:
 			vVal = variable.On
-		case variable.TiDBPessimisticTransactionFairLocking:
-			vVal = variable.On
 		}
+
+		failpoint.Inject("enableAggressiveLockingOnBootstrap", func() {
+			if v.Name == variable.TiDBPessimisticTransactionAggressiveLocking {
+				vVal = variable.On
+			}
+		})
 
 		// sanitize k and vVal
 		value := fmt.Sprintf(`("%s", "%s")`, sqlexec.EscapeString(k), sqlexec.EscapeString(vVal))

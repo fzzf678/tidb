@@ -833,10 +833,10 @@ func (it *copIterator) open(ctx context.Context, enabledRateLimitAction, enableC
 			it.memTracker.Consume(10 * MockResponseSizeForTest)
 		}
 	})
-	go taskSender.run(it.req.ConnID)
+	go taskSender.run()
 }
 
-func (sender *copIteratorTaskSender) run(connID uint64) {
+func (sender *copIteratorTaskSender) run() {
 	// Send tasks to feed the worker goroutines.
 	for _, t := range sender.tasks {
 		// we control the sending rate to prevent all tasks
@@ -857,9 +857,6 @@ func (sender *copIteratorTaskSender) run(connID uint64) {
 		exit = sender.sendToTaskCh(t, sendTo)
 		if exit {
 			break
-		}
-		if connID > 0 {
-			failpoint.Inject("pauseCopIterTaskSender", func() {})
 		}
 	}
 	close(sender.taskCh)

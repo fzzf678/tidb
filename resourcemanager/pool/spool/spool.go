@@ -31,8 +31,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const waitInterval = 5 * time.Millisecond
-
 // Pool is a single goroutine pool. it can not reuse the goroutine.
 type Pool struct {
 	wg                 sync.WaitGroup
@@ -40,10 +38,7 @@ type Pool struct {
 	options            *Options
 	capacity           int32
 	running            atomic.Int32
-	waiting            atomic.Int32
 	isStop             atomic.Bool
-	condMu             sync.Mutex
-	cond               sync.Cond
 	concurrencyMetrics prometheus.Gauge
 	taskManager        pooltask.TaskManager[any, any, any, any, pooltask.NilContext]
 	pool.BasePool
@@ -57,7 +52,6 @@ func NewPool(name string, size int32, component util.Component, options ...Optio
 		concurrencyMetrics: metrics.PoolConcurrencyCounter.WithLabelValues(name),
 		taskManager:        pooltask.NewTaskManager[any, any, any, any, pooltask.NilContext](size), // TODO: this general type
 	}
-	result.cond = *sync.NewCond(&result.condMu)
 	if size == 0 {
 		return nil, pool.ErrPoolParamsInvalid
 	}
@@ -85,9 +79,6 @@ func (p *Pool) Tune(size int32) {
 
 // Run runs a function in the pool.
 func (p *Pool) Run(fn func()) error {
-	p.waiting.Add(1)
-	defer p.cond.Signal()
-	defer p.waiting.Add(-1)
 	if p.isStop.Load() {
 		return pool.ErrPoolClosed
 	}
@@ -130,9 +121,6 @@ func (p *Pool) run(fn func()) {
 
 // RunWithConcurrency runs a function in the pool with concurrency.
 func (p *Pool) RunWithConcurrency(fns chan func(), concurrency uint32) error {
-	p.waiting.Add(1)
-	defer p.cond.Signal()
-	defer p.waiting.Add(-1)
 	if p.isStop.Load() {
 		return pool.ErrPoolClosed
 	}
@@ -155,9 +143,6 @@ func (p *Pool) RunWithConcurrency(fns chan func(), concurrency uint32) error {
 // checkAndAddRunning is to check if a task can run. If can, add the running number.
 func (p *Pool) checkAndAddRunning(concurrency uint32) (conc int32, run bool) {
 	for {
-		if p.isStop.Load() {
-			return 0, false
-		}
 		p.mu.Lock()
 		value, run := p.checkAndAddRunningInternal(int32(concurrency))
 		if run {
@@ -169,7 +154,7 @@ func (p *Pool) checkAndAddRunning(concurrency uint32) (conc int32, run bool) {
 			return 0, false
 		}
 		p.mu.Unlock()
-		time.Sleep(waitInterval)
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -188,12 +173,6 @@ func (p *Pool) checkAndAddRunningInternal(concurrency int32) (conc int32, run bo
 // ReleaseAndWait releases the pool and waits for all tasks to be completed.
 func (p *Pool) ReleaseAndWait() {
 	p.isStop.Store(true)
-	// wait for all the task in the pending to exit
-	p.cond.L.Lock()
-	for p.waiting.Load() > 0 {
-		p.cond.Wait()
-	}
-	p.cond.L.Unlock()
 	p.wg.Wait()
 	resourcemanager.InstanceResourceManager.Unregister(p.Name())
 }

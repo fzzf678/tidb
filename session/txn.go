@@ -60,7 +60,7 @@ type LazyTxn struct {
 	mutations     map[int64]*binlog.TableMutation
 	writeSLI      sli.TxnWriteThroughputSLI
 
-	enterFairLockingOnValid bool
+	enterAggressiveLockingOnValid bool
 
 	// TxnInfo is added for the lock view feature, the data is frequent modified but
 	// rarely read (just in query select * from information_schema.tidb_trx).
@@ -227,8 +227,8 @@ func (txn *LazyTxn) String() string {
 	}
 	if txn.txnFuture != nil {
 		res := "txnFuture"
-		if txn.enterFairLockingOnValid {
-			res += " (pending fair locking)"
+		if txn.enterAggressiveLockingOnValid {
+			res += " (pending aggressive locking)"
 		}
 		return res
 	}
@@ -289,9 +289,9 @@ func (txn *LazyTxn) changePendingToValid(ctx context.Context) error {
 	txn.Transaction = t
 	txn.initStmtBuf()
 
-	if txn.enterFairLockingOnValid {
-		txn.enterFairLockingOnValid = false
-		err = txn.Transaction.StartFairLocking()
+	if txn.enterAggressiveLockingOnValid {
+		txn.enterAggressiveLockingOnValid = false
+		err = txn.Transaction.StartAggressiveLocking()
 		if err != nil {
 			return err
 		}
@@ -318,7 +318,7 @@ func (txn *LazyTxn) changeToInvalid() {
 	txn.Transaction = nil
 	txn.txnFuture = nil
 
-	txn.enterFairLockingOnValid = false
+	txn.enterAggressiveLockingOnValid = false
 
 	txn.mu.Lock()
 	lastState := txn.mu.TxnInfo.State
@@ -473,78 +473,78 @@ func (txn *LazyTxn) LockKeysFunc(ctx context.Context, lockCtx *kv.LockCtx, fn fu
 	return txn.Transaction.LockKeysFunc(ctx, lockCtx, lockFunc, keys...)
 }
 
-// StartFairLocking wraps the inner transaction to support using fair locking with lazy initialization.
-func (txn *LazyTxn) StartFairLocking() error {
+// StartAggressiveLocking wraps the inner transaction to support using aggressive locking with lazy initialization.
+func (txn *LazyTxn) StartAggressiveLocking() error {
 	if txn.Valid() {
-		return txn.Transaction.StartFairLocking()
+		return txn.Transaction.StartAggressiveLocking()
 	} else if txn.pending() {
-		txn.enterFairLockingOnValid = true
+		txn.enterAggressiveLockingOnValid = true
 	} else {
-		err := errors.New("trying to start fair locking on a transaction in invalid state")
-		logutil.BgLogger().Error("unexpected error when starting fair locking", zap.Error(err), zap.Stringer("txn", txn))
+		err := errors.New("trying to start aggressive locking on a transaction in invalid state")
+		logutil.BgLogger().Error("unexpected error when starting aggressive locking", zap.Error(err), zap.Stringer("txn", txn))
 		return err
 	}
 	return nil
 }
 
-// RetryFairLocking wraps the inner transaction to support using fair locking with lazy initialization.
-func (txn *LazyTxn) RetryFairLocking(ctx context.Context) error {
+// RetryAggressiveLocking wraps the inner transaction to support using aggressive locking with lazy initialization.
+func (txn *LazyTxn) RetryAggressiveLocking(ctx context.Context) error {
 	if txn.Valid() {
-		return txn.Transaction.RetryFairLocking(ctx)
+		return txn.Transaction.RetryAggressiveLocking(ctx)
 	} else if !txn.pending() {
-		err := errors.New("trying to retry fair locking on a transaction in invalid state")
-		logutil.BgLogger().Error("unexpected error when retrying fair locking", zap.Error(err), zap.Stringer("txnStartTS", txn))
+		err := errors.New("trying to retry aggressive locking on a transaction in invalid state")
+		logutil.BgLogger().Error("unexpected error when retrying aggressive locking", zap.Error(err), zap.Stringer("txnStartTS", txn))
 		return err
 	}
 	return nil
 }
 
-// CancelFairLocking wraps the inner transaction to support using fair locking with lazy initialization.
-func (txn *LazyTxn) CancelFairLocking(ctx context.Context) error {
+// CancelAggressiveLocking wraps the inner transaction to support using aggressive locking with lazy initialization.
+func (txn *LazyTxn) CancelAggressiveLocking(ctx context.Context) error {
 	if txn.Valid() {
-		return txn.Transaction.CancelFairLocking(ctx)
+		return txn.Transaction.CancelAggressiveLocking(ctx)
 	} else if txn.pending() {
-		if txn.enterFairLockingOnValid {
-			txn.enterFairLockingOnValid = false
+		if txn.enterAggressiveLockingOnValid {
+			txn.enterAggressiveLockingOnValid = false
 		} else {
-			err := errors.New("trying to cancel fair locking when it's not started")
-			logutil.BgLogger().Error("unexpected error when cancelling fair locking", zap.Error(err), zap.Stringer("txnStartTS", txn))
+			err := errors.New("trying to cancel aggressive locking when it's not started")
+			logutil.BgLogger().Error("unexpected error when cancelling aggressive locking", zap.Error(err), zap.Stringer("txnStartTS", txn))
 			return err
 		}
 	} else {
-		err := errors.New("trying to cancel fair locking on a transaction in invalid state")
-		logutil.BgLogger().Error("unexpected error when cancelling fair locking", zap.Error(err), zap.Stringer("txnStartTS", txn))
+		err := errors.New("trying to cancel aggressive locking on a transaction in invalid state")
+		logutil.BgLogger().Error("unexpected error when cancelling aggressive locking", zap.Error(err), zap.Stringer("txnStartTS", txn))
 		return err
 	}
 	return nil
 }
 
-// DoneFairLocking wraps the inner transaction to support using fair locking with lazy initialization.
-func (txn *LazyTxn) DoneFairLocking(ctx context.Context) error {
+// DoneAggressiveLocking wraps the inner transaction to support using aggressive locking with lazy initialization.
+func (txn *LazyTxn) DoneAggressiveLocking(ctx context.Context) error {
 	if txn.Valid() {
-		return txn.Transaction.DoneFairLocking(ctx)
+		return txn.Transaction.DoneAggressiveLocking(ctx)
 	} else if txn.pending() {
-		if txn.enterFairLockingOnValid {
-			txn.enterFairLockingOnValid = false
+		if txn.enterAggressiveLockingOnValid {
+			txn.enterAggressiveLockingOnValid = false
 		} else {
-			err := errors.New("trying to finish fair locking when it's not started")
-			logutil.BgLogger().Error("unexpected error when finishing fair locking")
+			err := errors.New("trying to finish aggressive locking when it's not started")
+			logutil.BgLogger().Error("unexpected error when finishing aggressive locking")
 			return err
 		}
 	} else {
-		err := errors.New("trying to cancel fair locking on a transaction in invalid state")
-		logutil.BgLogger().Error("unexpected error when finishing fair locking")
+		err := errors.New("trying to cancel aggressive locking on a transaction in invalid state")
+		logutil.BgLogger().Error("unexpected error when finishing aggressive locking")
 		return err
 	}
 	return nil
 }
 
-// IsInFairLockingMode wraps the inner transaction to support using fair locking with lazy initialization.
-func (txn *LazyTxn) IsInFairLockingMode() bool {
+// IsInAggressiveLockingMode wraps the inner transaction to support using aggressive locking with lazy initialization.
+func (txn *LazyTxn) IsInAggressiveLockingMode() bool {
 	if txn.Valid() {
-		return txn.Transaction.IsInFairLockingMode()
+		return txn.Transaction.IsInAggressiveLockingMode()
 	} else if txn.pending() {
-		return txn.enterFairLockingOnValid
+		return txn.enterAggressiveLockingOnValid
 	} else {
 		return false
 	}

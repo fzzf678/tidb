@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/parser/ast"
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/parser/terror"
 	plannercore "github.com/pingcap/tidb/planner/core"
 	"github.com/pingcap/tidb/sessionctx"
@@ -106,10 +105,8 @@ func (p *PessimisticRCTxnContextProvider) OnStmtStart(ctx context.Context, node 
 // NeedSetRCCheckTSFlag checks whether it's needed to set `RCCheckTS` flag in current stmtctx.
 func NeedSetRCCheckTSFlag(ctx sessionctx.Context, node ast.Node) bool {
 	sessionVars := ctx.GetSessionVars()
-	if sessionVars.ConnectionID > 0 && variable.EnableRCReadCheckTS.Load() &&
-		sessionVars.InTxn() && !sessionVars.RetryInfo.Retrying &&
-		plannercore.IsReadOnly(node, sessionVars) &&
-		!ctx.GetSessionVars().GetStatusFlag(mysql.ServerStatusCursorExists) {
+	if sessionVars.ConnectionID > 0 && variable.EnableRCReadCheckTS.Load() && sessionVars.InTxn() &&
+		!sessionVars.RetryInfo.Retrying && plannercore.IsReadOnly(node, sessionVars) {
 		return true
 	}
 	return false
@@ -224,11 +221,11 @@ func (p *PessimisticRCTxnContextProvider) handleAfterPessimisticLockError(ctx co
 			zap.Uint64("deadlockKeyHash", deadlock.DeadlockKeyHash))
 		retryable = true
 
-		// In fair locking mode, when statement retry happens, `retryFairLockingIfNeeded` should be
+		// In aggressive locking mode, when statement retry happens, `retryAggressiveLockingIfNeeded` should be
 		// called to make its state ready for retrying. But single-statement deadlock is an exception. We need to exit
-		// fair locking in single-statement-deadlock case, otherwise the lock this statement has acquired won't be
+		// aggressive locking in single-statement-deadlock case, otherwise the lock this statement has acquired won't be
 		// released after retrying, so it still blocks another transaction and the deadlock won't be resolved.
-		if err := p.cancelFairLockingIfNeeded(ctx); err != nil {
+		if err := p.cancelAggressiveLockingIfNeeded(ctx); err != nil {
 			return sessiontxn.ErrorAction(err)
 		}
 	} else if terror.ErrorEqual(kv.ErrWriteConflict, lockErr) {
@@ -243,7 +240,7 @@ func (p *PessimisticRCTxnContextProvider) handleAfterPessimisticLockError(ctx co
 	}
 
 	if retryable {
-		if err := p.basePessimisticTxnContextProvider.retryFairLockingIfNeeded(ctx); err != nil {
+		if err := p.basePessimisticTxnContextProvider.retryAggressiveLockingIfNeeded(ctx); err != nil {
 			return sessiontxn.ErrorAction(err)
 		}
 		return sessiontxn.RetryReady()

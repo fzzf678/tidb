@@ -69,70 +69,45 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
-const (
-	tiflashReplica1 = 1
-	tiflashReplica2 = 2
-	tblSize         = 222
-)
-
 type tableRestoreSuiteBase struct {
 	tr  *TableImporter
 	cfg *config.Config
 
-	tableInfo  *checkpoints.TidbTableInfo
-	dbInfo     *checkpoints.TidbDBInfo
-	tableMeta  *mydump.MDTableMeta
-	tableMeta2 *mydump.MDTableMeta
+	tableInfo *checkpoints.TidbTableInfo
+	dbInfo    *checkpoints.TidbDBInfo
+	tableMeta *mydump.MDTableMeta
 
 	store storage.ExternalStorage
 }
 
-func mockTiflashTableInfo(t *testing.T, sql string, replica uint64) *model.TableInfo {
+func (s *tableRestoreSuiteBase) setupSuite(t *testing.T) {
+	web.EnableCurrentProgress()
+	// Produce a mock table info
+
 	p := parser.New()
 	p.SetSQLMode(mysql.ModeANSIQuotes)
 	se := tmock.NewContext()
-	node, err := p.ParseOneStmt(sql, "", "")
-	require.NoError(t, err)
-	core, err := ddl.MockTableInfo(se, node.(*ast.CreateTableStmt), 0xabcdef)
-	require.NoError(t, err)
-	core.State = model.StatePublic
-	core.TiFlashReplica = &model.TiFlashReplicaInfo{
-		Count:     replica,
-		Available: true,
-	}
-
-	return core
-}
-
-func (s *tableRestoreSuiteBase) setupSuite(t *testing.T) {
-	web.EnableCurrentProgress()
-
-	core := mockTiflashTableInfo(t, `CREATE TABLE "table" (
+	node, err := p.ParseOneStmt(`
+	CREATE TABLE "table" (
 		a INT,
 		b INT,
 		c INT,
 		KEY (b)
 	)
-`, tiflashReplica1)
-
-	core2 := mockTiflashTableInfo(t, `CREATE TABLE "table" (
-	a INT,
-	b INT,
-	c INT,
-	KEY (b)
-)
-`, tiflashReplica2)
+`, "", "")
+	require.NoError(t, err)
+	core, err := ddl.MockTableInfo(se, node.(*ast.CreateTableStmt), 0xabcdef)
+	require.NoError(t, err)
+	core.State = model.StatePublic
 
 	s.tableInfo = &checkpoints.TidbTableInfo{Name: "table", DB: "db", Core: core}
 	s.dbInfo = &checkpoints.TidbDBInfo{
-		Name: "db",
-		Tables: map[string]*checkpoints.TidbTableInfo{
-			"table":  s.tableInfo,
-			"table2": {Name: "table2", DB: "db", Core: core2},
-		},
+		Name:   "db",
+		Tables: map[string]*checkpoints.TidbTableInfo{"table": s.tableInfo},
 	}
 
 	// Write some sample SQL dump
+
 	fakeDataDir := t.TempDir()
 	store, err := storage.NewLocalStorage(fakeDataDir)
 	require.NoError(t, err)
@@ -177,21 +152,7 @@ func (s *tableRestoreSuiteBase) setupSuite(t *testing.T) {
 	s.tableMeta = &mydump.MDTableMeta{
 		DB:        "db",
 		Name:      "table",
-		TotalSize: tblSize,
-		SchemaFile: mydump.FileInfo{
-			TableName: filter.Table{Schema: "db", Name: "table"},
-			FileMeta: mydump.SourceFileMeta{
-				Path: "db.table-schema.sql",
-				Type: mydump.SourceTypeTableSchema,
-			},
-		},
-		DataFiles: fakeDataFiles,
-	}
-
-	s.tableMeta2 = &mydump.MDTableMeta{
-		DB:        "db",
-		Name:      "table2",
-		TotalSize: tblSize,
+		TotalSize: 222,
 		SchemaFile: mydump.FileInfo{
 			TableName: filter.Table{Schema: "db", Name: "table"},
 			FileMeta: mydump.SourceFileMeta{
@@ -1086,7 +1047,7 @@ func (s *tableRestoreSuite) TestCheckClusterResource() {
 			[]byte(`{
 				"max-replicas": 1
 			}`),
-			"(.*)The storage space is rich(.*)",
+			"(.*)Cluster available is rich(.*)",
 			true,
 			0,
 		},
@@ -1107,7 +1068,7 @@ func (s *tableRestoreSuite) TestCheckClusterResource() {
 			[]byte(`{
 				"max-replicas": 1
 			}`),
-			"(.*)Please increase storage(.*)",
+			"(.*)Cluster doesn't have enough space(.*)",
 			true,
 			0,
 		},
@@ -1430,11 +1391,13 @@ func (s *tableRestoreSuite) TestEstimate() {
 		AutoRandomSeed: 0,
 	}, nil, log.L())).AnyTimes()
 	importer := backend.MakeBackend(mockBackend)
+	s.cfg.TikvImporter.Backend = config.BackendLocal
 
+	template := NewSimpleTemplate()
 	dbMetas := []*mydump.MDDatabaseMeta{
 		{
 			Name:   "db1",
-			Tables: []*mydump.MDTableMeta{s.tableMeta, s.tableMeta2},
+			Tables: []*mydump.MDTableMeta{s.tableMeta},
 		},
 	}
 	dbInfos := map[string]*checkpoints.TidbDBInfo{
@@ -1442,7 +1405,6 @@ func (s *tableRestoreSuite) TestEstimate() {
 	}
 	ioWorkers := worker.NewPool(context.Background(), 1, "io")
 	mockTarget := restoremock.NewMockTargetInfo()
-	mockTarget.MaxReplicasPerRegion = 3
 
 	preInfoGetter := &PreImportInfoGetterImpl{
 		cfg:              s.cfg,
@@ -1453,34 +1415,34 @@ func (s *tableRestoreSuite) TestEstimate() {
 		targetInfoGetter: mockTarget,
 	}
 	preInfoGetter.Init()
-
-	preInfoGetter.cfg.TikvImporter.Backend = config.BackendLocal
+	theCheckBuilder := NewPrecheckItemBuilder(s.cfg, dbMetas, preInfoGetter, nil)
+	rc := &Controller{
+		cfg:                 s.cfg,
+		checkTemplate:       template,
+		store:               s.store,
+		backend:             importer,
+		dbMetas:             dbMetas,
+		dbInfos:             dbInfos,
+		ioWorkers:           ioWorkers,
+		preInfoGetter:       preInfoGetter,
+		precheckItemBuilder: theCheckBuilder,
+	}
 	preInfoGetter.dbInfosCache = dbInfos
 	estimateResult, err := preInfoGetter.EstimateSourceDataSize(ctx)
 	s.Require().NoError(err)
-
+	source := estimateResult.SizeWithIndex
 	// Because this file is small than region split size so we does not sample it.
-	tikvExpected := 2 * int64(compressionRatio*float64(tblSize)*float64(mockTarget.MaxReplicasPerRegion))
-	s.Require().Equal(tikvExpected, estimateResult.SizeWithIndex)
-	tiflashExpected := int64(compressionRatio * float64(tblSize) * float64(tiflashReplica1+tiflashReplica2))
-	s.Require().Equal(tiflashExpected, estimateResult.TiFlashSize)
-
+	s.Require().Equal(s.tableMeta.TotalSize, source)
 	s.tableMeta.TotalSize = int64(config.SplitRegionSize)
-	tikvExpected = int64(compressionRatio * float64(config.SplitRegionSize+tblSize) * float64(mockTarget.MaxReplicasPerRegion))
 	estimateResult, err = preInfoGetter.EstimateSourceDataSize(ctx, ropts.ForceReloadCache(true))
 	s.Require().NoError(err)
-	s.Require().Greater(estimateResult.SizeWithIndex, tikvExpected)
-	tiflashExpected = int64(compressionRatio * (float64(config.SplitRegionSize*tiflashReplica1) + float64(tblSize*tiflashReplica2)))
-	s.Require().Greater(estimateResult.TiFlashSize, tiflashExpected)
-
-	// tidb backend don't compress
-	preInfoGetter.cfg.TikvImporter.Backend = config.BackendTiDB
+	source = estimateResult.SizeWithIndex
+	s.Require().Greater(source, s.tableMeta.TotalSize)
+	rc.cfg.TikvImporter.Backend = config.BackendTiDB
 	estimateResult, err = preInfoGetter.EstimateSourceDataSize(ctx, ropts.ForceReloadCache(true))
 	s.Require().NoError(err)
-	tikvExpected = int64((int(config.SplitRegionSize) + tblSize) * mockTarget.MaxReplicasPerRegion)
-	s.Require().Equal(tikvExpected, estimateResult.SizeWithIndex)
-	tiflashExpected = int64(config.SplitRegionSize*tiflashReplica1 + tblSize*tiflashReplica2)
-	s.Require().Equal(tiflashExpected, estimateResult.TiFlashSize)
+	source = estimateResult.SizeWithIndex
+	s.Require().Equal(s.tableMeta.TotalSize, source)
 }
 
 func (s *tableRestoreSuite) TestSchemaIsValid() {
