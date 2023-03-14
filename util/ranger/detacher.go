@@ -849,6 +849,11 @@ type rangeDetacher struct {
 
 func (d *rangeDetacher) detachCondAndBuildRangeForCols() (*DetachRangeResult, error) {
 	res := &DetachRangeResult{}
+	if len(d.cols) == 0 {
+		// return a full range if rangeDetacher has no cols
+		res.Ranges = FullRange()
+		return res, nil
+	}
 	newTpSlice := make([]*types.FieldType, 0, len(d.cols))
 	for _, col := range d.cols {
 		newTpSlice = append(newTpSlice, newFieldType(col.RetType))
