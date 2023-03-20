@@ -1,6 +1,6 @@
 # TiDB Roadmap
 
-This roadmap brings you what's coming in the 1-year future, so you can see the new features or improvements in advance, follow the progress, learn about the key milestones on the way, and give feedback as the development work goes on. In the course of development, this roadmap is subject to change based on user needs and feedback. If you have a feature request or want to prioritize a feature, please file an issue on [GitHub](https://github.com/pingcap/tidb/issues).
+This roadmap brings you what's coming in the future, so you can see the new features or improvements in advance, follow the progress, learn about the key milestones on the way, and give feedback as the development work goes on. In the course of development, this roadmap is subject to change based on user needs and feedback. If you have a feature request or want to prioritize a feature, please file an issue on [GitHub](https://github.com/pingcap/tidb/issues).
 
 ## Highlights of what we are planning
 
@@ -8,9 +8,9 @@ This roadmap brings you what's coming in the 1-year future, so you can see the n
   <thead>
     <tr>
       <th>Category</th>
-      <th>Mid-year LTS release</th>
-      <th>End-of-year LTS release</th>
-      <th>2-3 year projection</th>
+      <th>Mid-calendar-year LTS release</th>
+      <th>End-calendar-year LTS release</th>
+      <th>Future releases</th>
     </tr>
   </thead>
   <tbody valign="top">
@@ -335,7 +335,7 @@ This roadmap brings you what's coming in the 1-year future, so you can see the n
           <br />
           <li>
             <b>Database encryption</b>
-            <br /><i>Support data-at-rest encryption for database files</i>
+            <br /><i>Encryption at rest with more granularity in table-level and column-level</i>
           </li>
           <br />
           <li>

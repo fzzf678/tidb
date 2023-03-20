@@ -76,19 +76,19 @@ func matchSQLBinding(sctx sessionctx.Context, stmtNode ast.StmtNode) (bindRecord
 // getPlanFromNonPreparedPlanCache tries to get an available cached plan from the NonPrepared Plan Cache for this stmt.
 func getPlanFromNonPreparedPlanCache(ctx context.Context, sctx sessionctx.Context, stmt ast.StmtNode, is infoschema.InfoSchema) (p core.Plan, ns types.NameSlice, ok bool, err error) {
 	stmtCtx := sctx.GetSessionVars().StmtCtx
+	_, isExplain := stmt.(*ast.ExplainStmt)
 	if !sctx.GetSessionVars().EnableNonPreparedPlanCache || // disabled
 		stmtCtx.InPreparedPlanBuilding || // already in cached plan rebuilding phase
 		stmtCtx.EnableOptimizerCETrace || stmtCtx.EnableOptimizeTrace || // in trace
 		stmtCtx.InRestrictedSQL || // is internal SQL
-		sctx.GetSessionVars().StmtCtx.InExplainStmt { // in explain
+		isExplain || // explain external
+		(stmtCtx.InExplainStmt && stmtCtx.ExplainFormat != types.ExplainFormatPlanCache) { // in explain internal
 		return nil, nil, false, nil
 	}
 	ok, reason := core.NonPreparedPlanCacheableWithCtx(sctx, stmt, is)
 	if !ok {
-		_, isExplain := stmt.(*ast.ExplainStmt)
-		if !isExplain && sctx.GetSessionVars().StmtCtx.InExplainStmt {
-			notice := errors.Errorf("skip non-prep plan cache: %v", reason)
-			sctx.GetSessionVars().StmtCtx.AppendWarning(notice)
+		if !isExplain && stmtCtx.InExplainStmt && stmtCtx.ExplainFormat == types.ExplainFormatPlanCache {
+			stmtCtx.AppendWarning(errors.Errorf("skip non-prepared plan-cache: %s", reason))
 		}
 		return nil, nil, false, nil
 	}
@@ -493,7 +493,7 @@ func OptimizeExecStmt(ctx context.Context, sctx sessionctx.Context,
 
 func buildLogicalPlan(ctx context.Context, sctx sessionctx.Context, node ast.Node, builder *core.PlanBuilder) (core.Plan, error) {
 	sctx.GetSessionVars().PlanID = 0
-	sctx.GetSessionVars().PlanColumnID = 0
+	sctx.GetSessionVars().PlanColumnID.Store(0)
 	sctx.GetSessionVars().MapHashCode2UniqueID4ExtendedCol = nil
 
 	failpoint.Inject("mockRandomPlanID", func() {
