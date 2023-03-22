@@ -1642,3 +1642,9 @@ func TestIssue42150(t *testing.T) {
 	tk.MustExec("execute st")
 	tk.MustQuery("select @@last_plan_from_cache").Check(testkit.Rows("1"))
 }
+
+func TestBranch42150(t *testing.T) {
+	store := testkit.CreateMockStore(t)
+	tk := testkit.NewTestKit(t, store)
+	tk.MustExec(`use test`)
+}
