@@ -1676,6 +1676,22 @@ func (c *compareFunctionClass) refineArgs(ctx sessionctx.Context, args []Express
 		return []Expression{NewOne(), NewZero()}, nil
 	}
 
+	// decimal column [cmp] bigint column
+	_, arg0IsCol := args[0].(*Column)
+	_, arg1IsCol := args[1].(*Column)
+	var err error
+	if arg0IsCol && arg1IsCol && c.op == opcode.EQ {
+		// todo(fzzf678): check hint
+		if arg0EvalType == types.ETDecimal && arg1EvalType == types.ETInt {
+			finalArg0, err = c.refineDecimalColCmpBigIntCol(ctx, finalArg0, finalArg1.GetType().Clone())
+		} else if arg0EvalType == types.ETInt && arg1EvalType == types.ETDecimal {
+			finalArg1, err = c.refineDecimalColCmpBigIntCol(ctx, finalArg1, finalArg0.GetType().Clone())
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
 	return c.refineArgsByUnsignedFlag(ctx, []Expression{finalArg0, finalArg1}), nil
 }
 
@@ -1762,6 +1778,20 @@ func (c *compareFunctionClass) refineArgsByUnsignedFlag(ctx sessionctx.Context, 
 		}
 	}
 	return args
+}
+
+// refine args for decimal column [cmp] bigint column
+func (c *compareFunctionClass) refineDecimalColCmpBigIntCol(ctx sessionctx.Context, arg Expression, tp *types.FieldType) (Expression, error) {
+	var decimalCol = arg.(*Column)
+	if decimalCol.GetType().GetDecimal() != 0 || decimalCol.GetType().GetFlen() >= 20 {
+		// If the decimal column has a scale not equal to 0, we can't convert it to bigint.
+		// If the decimal column has a precision greater than 20, we can't convert it to bigint.
+		// todo(fzzf678): print log info or throw warning here
+		return arg, nil
+	}
+	castToBigInt, err := BuildCastFunctionWithCheck(ctx, decimalCol, tp)
+
+	return castToBigInt, err
 }
 
 // getFunction sets compare built-in function signatures for various types.
