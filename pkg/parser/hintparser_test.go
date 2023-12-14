@@ -346,6 +346,30 @@ func TestParseHint(t *testing.T) {
 				},
 			},
 		},
+		{
+			input: "CAST_DECIMAL_AS_BIGINT('aa.bb.cc')",
+			errs: []string{
+				`Optimizer hint syntax error at line 1 `,
+			},
+		},
+		{
+			input: "CAST_DECIMAL_AS_BIGINT('aa.bb.cc, dd.ee.ff')",
+			errs: []string{
+				`Optimizer hint syntax error at line 1 `,
+			},
+		},
+		{
+			input: "CAST_DECIMAL_AS_BIGINT('aa.bb.cc','dd.ee.ff')",
+			output: []*ast.TableOptimizerHint{
+				{
+					HintName: model.NewCIStr("CAST_DECIMAL_AS_BIGINT"),
+					HintData: ast.HintCastColumns{
+						Col1: "aa.bb.cc",
+						Col2: "dd.ee.ff",
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {

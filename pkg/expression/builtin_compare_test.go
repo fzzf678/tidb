@@ -429,3 +429,35 @@ func TestIssue46475(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, f.GetType().GetType(), mysql.TypeDate)
 }
+
+func TestRefineDecimalColCmpBigIntCol(t *testing.T) {
+	ctx := createContext(t)
+	bigIntCol := &Column{RetType: types.NewFieldType(mysql.TypeLonglong), OrigName: "test.test.bigint"}
+
+	ctx.GetSessionVars().StmtCtx.OriginalTableHints = []*ast.TableOptimizerHint{
+		{
+			HintName: model.NewCIStr("cast_decimal_as_bigint"),
+			HintData: ast.HintCastColumns{Col1: "test.test.decimal", Col2: "test.test.bigint"},
+		},
+	}
+	// decimal(18, 0)
+	decCol := &Column{RetType: types.NewFieldTypeBuilder().SetType(mysql.TypeNewDecimal).SetFlen(10).SetDecimal(0).BuildP(), OrigName: "test.test.decimal"}
+	f, err := newFunctionForTest(ctx, ast.EQ, decCol, bigIntCol)
+	require.NoError(t, err)
+	require.Equal(t, f.GetType().GetType(), mysql.TypeLonglong)
+	require.Equal(t, f.(*ScalarFunction).Function.getArgs()[0].(*ScalarFunction).GetType().GetType(), mysql.TypeLonglong)
+	// decimal(19, 0)
+	decCol = &Column{RetType: types.NewFieldTypeBuilder().SetType(mysql.TypeNewDecimal).SetFlen(19).SetDecimal(0).BuildP(), OrigName: "test.test.decimal"}
+	f, err = newFunctionForTest(ctx, ast.EQ, decCol, bigIntCol)
+	require.NoError(t, err)
+	require.Equal(t, f.(*ScalarFunction).Function.getArgs()[1].(*ScalarFunction).GetType().GetType(), mysql.TypeNewDecimal)
+	warning := ctx.GetSessionVars().StmtCtx.GetWarnings()[0].Err.Error()
+	require.Contains(t, warning, "CAST_DECIMAL_AS_BIGINT")
+	// decimal(10, 1)
+	decCol = &Column{RetType: types.NewFieldTypeBuilder().SetType(mysql.TypeNewDecimal).SetFlen(10).SetDecimal(1).BuildP(), OrigName: "test.test.decimal"}
+	f, err = newFunctionForTest(ctx, ast.EQ, decCol, bigIntCol)
+	require.NoError(t, err)
+	require.Equal(t, f.(*ScalarFunction).Function.getArgs()[1].(*ScalarFunction).GetType().GetType(), mysql.TypeNewDecimal)
+	warning = ctx.GetSessionVars().StmtCtx.GetWarnings()[0].Err.Error()
+	require.Contains(t, warning, "CAST_DECIMAL_AS_BIGINT")
+}
