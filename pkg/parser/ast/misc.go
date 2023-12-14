@@ -3676,6 +3676,12 @@ type HintTable struct {
 	PartitionList []model.CIStr
 }
 
+// HintCastColumns is the payload of cast decimal as bigint cols.
+type HintCastColumns struct {
+	Col1 string
+	Col2 string
+}
+
 func (ht *HintTable) Restore(ctx *format.RestoreCtx) {
 	if ht.DBName.L != "" {
 		ctx.WriteName(ht.DBName.String())
@@ -3789,6 +3795,11 @@ func (n *TableOptimizerHint) Restore(ctx *format.RestoreCtx) error {
 		ctx.WritePlain(hintData.VarName)
 		ctx.WritePlain(" = ")
 		ctx.WritePlain(hintData.Value)
+	case "cast_decimal_as_bigint":
+		hintData := n.HintData.(HintCastColumns)
+		ctx.WriteString(hintData.Col1)
+		ctx.WritePlain(", ")
+		ctx.WriteString(hintData.Col2)
 	}
 	ctx.WritePlain(")")
 	return nil

@@ -123,6 +123,7 @@ import (
 	hintLeading               "LEADING"
 	hintSemiJoinRewrite       "SEMI_JOIN_REWRITE"
 	hintNoDecorrelate         "NO_DECORRELATE"
+	hintCastDecimalAsBigint   "CAST_DECIMAL_AS_BIGINT"
 
 	/* Other keywords */
 	hintOLAP            "OLAP"
@@ -351,6 +352,17 @@ TableOptimizerHintOpt:
 			HintName: model.NewCIStr($1),
 			QBName:   model.NewCIStr($3),
 			HintData: model.NewCIStr($4),
+		}
+	}
+|   "CAST_DECIMAL_AS_BIGINT" '(' QueryBlockOpt hintStringLit CommaOpt hintStringLit ')'
+	{
+		$$ = &ast.TableOptimizerHint{
+			HintName: model.NewCIStr($1),
+			QBName:   model.NewCIStr($3),
+			HintData: ast.HintCastColumns{
+				Col1: $4,
+				Col2: $6,
+			},
 		}
 	}
 
@@ -754,6 +766,7 @@ Identifier:
 |	"LEADING"
 |	"SEMI_JOIN_REWRITE"
 |	"NO_DECORRELATE"
+|	"CAST_DECIMAL_AS_BIGINT"
 /* other keywords */
 |	"OLAP"
 |	"OLTP"
