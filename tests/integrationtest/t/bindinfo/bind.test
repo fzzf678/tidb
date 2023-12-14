@@ -141,3 +141,57 @@ create table t(id int, value decimal(5,2));
 table t;
 explain table t;
 desc table t;
+
+# TestCastDecimalAsBigIntBinding
+set tidb_cost_model_version=2;
+create table t41(id int primary key,name decimal(10,0), key idx_name(name));
+create table t43(id int primary key,name bigint, key idx_name(name));
+create table t44(id int primary key,name bigint, key idx_name(name));
+create table t45(id int primary key,name bigint, key idx_name(name));
+insert into t41 values(1,2);
+insert into t43 values(1,2),(2,2);
+insert into t44 values(1,2),(2,2);
+insert into t45 values(1,2),(2,2);
+--enable_warnings
+create global binding for
+    select t41.* from t41,t43 where t41.name=t43.name and t41.id=1
+using
+    select /*+ cast_decimal_as_bigint('bindinfo__bind.t43.name', 'bindinfo__bind.t41.name') */ t41.* from t41,t43 where t41.name=t43.name and t41.id=1;
+explain select t41.* from t41,t43 where t41.name=t43.name and t41.id=1;
+select t41.* from t41,t43 where t41.name=t43.name and t41.id=1;
+
+create binding for
+    select t41.* from t41 join t43 on t41.name=t43.name and t41.id=1
+using
+    select /*+ cast_decimal_as_bigint('bindinfo__bind.t43.name', 'bindinfo__bind.t41.name') */ t41.* from t41 join t43 on t41.name=t43.name and t41.id=1;
+explain select t41.* from t41 join t43 on t41.name=t43.name and t41.id=1;
+select t41.* from t41 join t43 on t41.name=t43.name and t41.id=1;
+
+create binding for
+    select t41.* from t41,t43,t44 where t41.name=t43.name and t41.id=1 and t41.name=t44.name
+using
+    select /*+ cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t43.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t44.name') */ t41.* from t41,t43,t44 where t41.name=t43.name and t41.id=1 and t41.name=t44.name;
+explain select t41.* from t41,t43,t44 where t41.name=t43.name and t41.id=1 and t41.name=t44.name;
+select t41.* from t41,t43,t44 where t41.name=t43.name and t41.id=1 and t41.name=t44.name;
+
+create binding for
+    select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name and t41.id=1
+using
+    select /*+ cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t43.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t44.name') */ t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name and t41.id=1;
+explain select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name and t41.id=1;
+select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name and t41.id=1;
+
+create binding for
+    select t41.* from t41,t43,t44,t45 where t41.name=t43.name and t41.id=1 and t41.name=t44.name and t41.name=t45.name
+using
+    select /*+ cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t43.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t44.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t45.name') */ t41.* from t41,t43,t44,t45 where t41.name=t43.name and t41.id=1 and t41.name=t44.name and t41.name=t45.name;
+explain select t41.* from t41,t43,t44,t45 where t41.name=t43.name and t41.id=1 and t41.name=t44.name and t41.name=t45.name;
+select t41.* from t41,t43,t44,t45 where t41.name=t43.name and t41.id=1 and t41.name=t44.name and t41.name=t45.name;
+
+create binding for
+    select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name join t45 on t41.name=t45.name and t41.id=1
+using
+    select /*+ cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t43.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t44.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t45.name') */ t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name join t45 on t41.name=t45.name and t41.id=1;
+explain select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name join t45 on t41.name=t45.name and t41.id=1;
+select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name join t45 on t41.name=t45.name and t41.id=1;
+--disable_warnings

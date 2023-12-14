@@ -325,3 +325,142 @@ desc table t;
 id	estRows	task	access object	operator info
 TableReader_5	10000.00	root		data:TableFullScan_4
 └─TableFullScan_4	10000.00	cop[tikv]	table:t	keep order:false, stats:pseudo
+set tidb_cost_model_version=2;
+create table t41(id int primary key,name decimal(10,0), key idx_name(name));
+create table t43(id int primary key,name bigint, key idx_name(name));
+create table t44(id int primary key,name bigint, key idx_name(name));
+create table t45(id int primary key,name bigint, key idx_name(name));
+insert into t41 values(1,2);
+insert into t43 values(1,2),(2,2);
+insert into t44 values(1,2),(2,2);
+insert into t45 values(1,2),(2,2);
+create global binding for
+select t41.* from t41,t43 where t41.name=t43.name and t41.id=1
+using
+select /*+ cast_decimal_as_bigint('bindinfo__bind.t43.name', 'bindinfo__bind.t41.name') */ t41.* from t41,t43 where t41.name=t43.name and t41.id=1;
+explain select t41.* from t41,t43 where t41.name=t43.name and t41.id=1;
+id	estRows	task	access object	operator info
+IndexHashJoin_15	1.25	root		inner join, inner:IndexReader_12, outer key:Column#5, inner key:bindinfo__bind.t43.name, equal cond:eq(Column#5, bindinfo__bind.t43.name)
+├─Projection_22(Build)	1.00	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#5
+│ └─Point_Get_23	1.00	root	table:t41	handle:1
+└─IndexReader_12(Probe)	1.25	root		index:IndexRangeScan_11
+  └─IndexRangeScan_11	1.25	cop[tikv]	table:t43, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t43.name, Column#5)], keep order:false, stats:pseudo
+select t41.* from t41,t43 where t41.name=t43.name and t41.id=1;
+id	name
+1	2
+1	2
+create binding for
+select t41.* from t41 join t43 on t41.name=t43.name and t41.id=1
+using
+select /*+ cast_decimal_as_bigint('bindinfo__bind.t43.name', 'bindinfo__bind.t41.name') */ t41.* from t41 join t43 on t41.name=t43.name and t41.id=1;
+explain select t41.* from t41 join t43 on t41.name=t43.name and t41.id=1;
+id	estRows	task	access object	operator info
+IndexHashJoin_15	1.25	root		inner join, inner:IndexReader_12, outer key:Column#5, inner key:bindinfo__bind.t43.name, equal cond:eq(Column#5, bindinfo__bind.t43.name)
+├─Projection_22(Build)	1.00	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#5
+│ └─Point_Get_23	1.00	root	table:t41	handle:1
+└─IndexReader_12(Probe)	1.25	root		index:IndexRangeScan_11
+  └─IndexRangeScan_11	1.25	cop[tikv]	table:t43, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t43.name, Column#5)], keep order:false, stats:pseudo
+select t41.* from t41 join t43 on t41.name=t43.name and t41.id=1;
+id	name
+1	2
+1	2
+create binding for
+select t41.* from t41,t43,t44 where t41.name=t43.name and t41.id=1 and t41.name=t44.name
+using
+select /*+ cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t43.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t44.name') */ t41.* from t41,t43,t44 where t41.name=t43.name and t41.id=1 and t41.name=t44.name;
+explain select t41.* from t41,t43,t44 where t41.name=t43.name and t41.id=1 and t41.name=t44.name;
+id	estRows	task	access object	operator info
+IndexHashJoin_20	1.56	root		inner join, inner:IndexReader_17, outer key:Column#9, inner key:bindinfo__bind.t44.name, equal cond:eq(Column#9, bindinfo__bind.t44.name)
+├─Projection_27(Build)	1.25	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#9
+│ └─IndexHashJoin_33	1.25	root		inner join, inner:IndexReader_30, outer key:Column#7, inner key:bindinfo__bind.t43.name, equal cond:eq(Column#7, bindinfo__bind.t43.name)
+│   ├─Projection_40(Build)	1.00	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#7
+│   │ └─Point_Get_41	1.00	root	table:t41	handle:1
+│   └─IndexReader_30(Probe)	1.25	root		index:IndexRangeScan_29
+│     └─IndexRangeScan_29	1.25	cop[tikv]	table:t43, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t43.name, Column#7)], keep order:false, stats:pseudo
+└─IndexReader_17(Probe)	1.56	root		index:IndexRangeScan_16
+  └─IndexRangeScan_16	1.56	cop[tikv]	table:t44, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t44.name, Column#9)], keep order:false, stats:pseudo
+select t41.* from t41,t43,t44 where t41.name=t43.name and t41.id=1 and t41.name=t44.name;
+id	name
+1	2
+1	2
+1	2
+1	2
+create binding for
+select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name and t41.id=1
+using
+select /*+ cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t43.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t44.name') */ t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name and t41.id=1;
+explain select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name and t41.id=1;
+id	estRows	task	access object	operator info
+IndexHashJoin_21	1.56	root		inner join, inner:IndexReader_18, outer key:Column#9, inner key:bindinfo__bind.t44.name, equal cond:eq(Column#9, bindinfo__bind.t44.name)
+├─Projection_28(Build)	1.25	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#9
+│ └─IndexHashJoin_34	1.25	root		inner join, inner:IndexReader_31, outer key:Column#7, inner key:bindinfo__bind.t43.name, equal cond:eq(Column#7, bindinfo__bind.t43.name)
+│   ├─Projection_41(Build)	1.00	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#7
+│   │ └─Point_Get_42	1.00	root	table:t41	handle:1
+│   └─IndexReader_31(Probe)	1.25	root		index:IndexRangeScan_30
+│     └─IndexRangeScan_30	1.25	cop[tikv]	table:t43, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t43.name, Column#7)], keep order:false, stats:pseudo
+└─IndexReader_18(Probe)	1.56	root		index:IndexRangeScan_17
+  └─IndexRangeScan_17	1.56	cop[tikv]	table:t44, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t44.name, Column#9)], keep order:false, stats:pseudo
+select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name and t41.id=1;
+id	name
+1	2
+1	2
+1	2
+1	2
+create binding for
+select t41.* from t41,t43,t44,t45 where t41.name=t43.name and t41.id=1 and t41.name=t44.name and t41.name=t45.name
+using
+select /*+ cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t43.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t44.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t45.name') */ t41.* from t41,t43,t44,t45 where t41.name=t43.name and t41.id=1 and t41.name=t44.name and t41.name=t45.name;
+explain select t41.* from t41,t43,t44,t45 where t41.name=t43.name and t41.id=1 and t41.name=t44.name and t41.name=t45.name;
+id	estRows	task	access object	operator info
+IndexHashJoin_25	1.95	root		inner join, inner:IndexReader_22, outer key:Column#14, inner key:bindinfo__bind.t45.name, equal cond:eq(Column#14, bindinfo__bind.t45.name)
+├─Projection_32(Build)	1.56	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#14
+│ └─IndexHashJoin_38	1.56	root		inner join, inner:IndexReader_35, outer key:Column#11, inner key:bindinfo__bind.t44.name, equal cond:eq(Column#11, bindinfo__bind.t44.name)
+│   ├─Projection_45(Build)	1.25	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#11
+│   │ └─IndexHashJoin_51	1.25	root		inner join, inner:IndexReader_48, outer key:Column#9, inner key:bindinfo__bind.t43.name, equal cond:eq(Column#9, bindinfo__bind.t43.name)
+│   │   ├─Projection_58(Build)	1.00	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#9
+│   │   │ └─Point_Get_59	1.00	root	table:t41	handle:1
+│   │   └─IndexReader_48(Probe)	1.25	root		index:IndexRangeScan_47
+│   │     └─IndexRangeScan_47	1.25	cop[tikv]	table:t43, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t43.name, Column#9)], keep order:false, stats:pseudo
+│   └─IndexReader_35(Probe)	1.56	root		index:IndexRangeScan_34
+│     └─IndexRangeScan_34	1.56	cop[tikv]	table:t44, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t44.name, Column#11)], keep order:false, stats:pseudo
+└─IndexReader_22(Probe)	1.95	root		index:IndexRangeScan_21
+  └─IndexRangeScan_21	1.95	cop[tikv]	table:t45, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t45.name, Column#14)], keep order:false, stats:pseudo
+select t41.* from t41,t43,t44,t45 where t41.name=t43.name and t41.id=1 and t41.name=t44.name and t41.name=t45.name;
+id	name
+1	2
+1	2
+1	2
+1	2
+1	2
+1	2
+1	2
+1	2
+create binding for
+select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name join t45 on t41.name=t45.name and t41.id=1
+using
+select /*+ cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t43.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t44.name'), cast_decimal_as_bigint('bindinfo__bind.t41.name', 'bindinfo__bind.t45.name') */ t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name join t45 on t41.name=t45.name and t41.id=1;
+explain select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name join t45 on t41.name=t45.name and t41.id=1;
+id	estRows	task	access object	operator info
+IndexHashJoin_27	1.95	root		inner join, inner:IndexReader_24, outer key:Column#14, inner key:bindinfo__bind.t45.name, equal cond:eq(Column#14, bindinfo__bind.t45.name)
+├─Projection_34(Build)	1.56	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#14
+│ └─IndexHashJoin_40	1.56	root		inner join, inner:IndexReader_37, outer key:Column#11, inner key:bindinfo__bind.t44.name, equal cond:eq(Column#11, bindinfo__bind.t44.name)
+│   ├─Projection_47(Build)	1.25	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#11
+│   │ └─IndexHashJoin_53	1.25	root		inner join, inner:IndexReader_50, outer key:Column#9, inner key:bindinfo__bind.t43.name, equal cond:eq(Column#9, bindinfo__bind.t43.name)
+│   │   ├─Projection_60(Build)	1.00	root		bindinfo__bind.t41.id, bindinfo__bind.t41.name, cast(bindinfo__bind.t41.name, bigint(20))->Column#9
+│   │   │ └─Point_Get_61	1.00	root	table:t41	handle:1
+│   │   └─IndexReader_50(Probe)	1.25	root		index:IndexRangeScan_49
+│   │     └─IndexRangeScan_49	1.25	cop[tikv]	table:t43, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t43.name, Column#9)], keep order:false, stats:pseudo
+│   └─IndexReader_37(Probe)	1.56	root		index:IndexRangeScan_36
+│     └─IndexRangeScan_36	1.56	cop[tikv]	table:t44, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t44.name, Column#11)], keep order:false, stats:pseudo
+└─IndexReader_24(Probe)	1.95	root		index:IndexRangeScan_23
+  └─IndexRangeScan_23	1.95	cop[tikv]	table:t45, index:idx_name(name)	range: decided by [eq(bindinfo__bind.t45.name, Column#14)], keep order:false, stats:pseudo
+select t41.* from t41 join t43 on t41.name=t43.name join t44 on t41.name=t44.name join t45 on t41.name=t45.name and t41.id=1;
+id	name
+1	2
+1	2
+1	2
+1	2
+1	2
+1	2
+1	2
+1	2
