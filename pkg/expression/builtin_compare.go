@@ -16,6 +16,7 @@ package expression
 
 import (
 	"cmp"
+	"fmt"
 	"math"
 	"strings"
 
@@ -1677,15 +1678,15 @@ func (c *compareFunctionClass) refineArgs(ctx sessionctx.Context, args []Express
 	}
 
 	// decimal column [cmp] bigint column
-	_, arg0IsCol := args[0].(*Column)
-	_, arg1IsCol := args[1].(*Column)
+	col1, arg0IsCol := args[0].(*Column)
+	col2, arg1IsCol := args[1].(*Column)
 	var err error
-	if arg0IsCol && arg1IsCol && c.op == opcode.EQ {
-		// todo(fzzf678): check hint
+	hint := matchCastDecimalAsBigIntHint(ctx.GetSessionVars().StmtCtx.OriginalTableHints, col1, col2)
+	if arg0IsCol && arg1IsCol && hint != nil && c.op == opcode.EQ {
 		if arg0EvalType == types.ETDecimal && arg1EvalType == types.ETInt {
-			finalArg0, err = c.refineDecimalColCmpBigIntCol(ctx, finalArg0, finalArg1.GetType().Clone())
+			finalArg0, err = c.refineDecimalColCmpBigIntCol(ctx, finalArg0, finalArg1.GetType().Clone(), hint)
 		} else if arg0EvalType == types.ETInt && arg1EvalType == types.ETDecimal {
-			finalArg1, err = c.refineDecimalColCmpBigIntCol(ctx, finalArg1, finalArg0.GetType().Clone())
+			finalArg1, err = c.refineDecimalColCmpBigIntCol(ctx, finalArg1, finalArg0.GetType().Clone(), hint)
 		}
 	}
 	if err != nil {
@@ -1693,6 +1694,20 @@ func (c *compareFunctionClass) refineArgs(ctx sessionctx.Context, args []Express
 	}
 
 	return c.refineArgsByUnsignedFlag(ctx, []Expression{finalArg0, finalArg1}), nil
+}
+
+func matchCastDecimalAsBigIntHint(originHints []*ast.TableOptimizerHint, col1, col2 *Column) *ast.TableOptimizerHint {
+	for _, hint := range originHints {
+		castCols, ok := hint.HintData.(ast.HintCastColumns)
+		if !ok || hint.HintName.L != "cast_decimal_as_bigint" {
+			continue
+		}
+		if (col1.OrigName == castCols.Col1 && col2.OrigName == castCols.Col2) ||
+			(col1.OrigName == castCols.Col2 && col2.OrigName == castCols.Col1) {
+			return hint
+		}
+	}
+	return nil
 }
 
 // see https://github.com/pingcap/tidb/issues/38361 for more details
@@ -1781,12 +1796,14 @@ func (c *compareFunctionClass) refineArgsByUnsignedFlag(ctx sessionctx.Context, 
 }
 
 // refine args for decimal column [cmp] bigint column
-func (c *compareFunctionClass) refineDecimalColCmpBigIntCol(ctx sessionctx.Context, arg Expression, tp *types.FieldType) (Expression, error) {
+func (c *compareFunctionClass) refineDecimalColCmpBigIntCol(ctx sessionctx.Context, arg Expression, tp *types.FieldType, hint *ast.TableOptimizerHint) (Expression, error) {
 	var decimalCol = arg.(*Column)
-	if decimalCol.GetType().GetDecimal() != 0 || decimalCol.GetType().GetFlen() >= 20 {
+	if decimalCol.GetType().GetDecimal() != 0 || decimalCol.GetType().GetFlen() >= 19 {
 		// If the decimal column has a scale not equal to 0, we can't convert it to bigint.
-		// If the decimal column has a precision greater than 20, we can't convert it to bigint.
-		// todo(fzzf678): print log info or throw warning here
+		// If the decimal column has a precision greater than 19, we can't convert it to bigint.
+		hintData := hint.HintData.(ast.HintCastColumns)
+		errMsg := fmt.Sprintf("Optimizer Hint /*+ CAST_DECIMAL_AS_BIGINT(%s, %s) */ is inapplicable", hintData.Col1, hintData.Col2)
+		ctx.GetSessionVars().StmtCtx.AppendWarning(ErrInternal.GenWithStack(errMsg))
 		return arg, nil
 	}
 	castToBigInt, err := BuildCastFunctionWithCheck(ctx, decimalCol, tp)
