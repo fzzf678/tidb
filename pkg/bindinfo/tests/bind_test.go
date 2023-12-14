@@ -1311,3 +1311,24 @@ func TestDropBindBySQLDigest(t *testing.T) {
 	tk.MustGetErrMsg(fmt.Sprintf("drop binding for sql digest '%s'", "1"), "can't find any binding for '1'")
 	tk.MustGetErrMsg(fmt.Sprintf("drop binding for sql digest '%s'", ""), "sql digest is empty")
 }
+
+func TestCastDecimalasBigIntBinding(t *testing.T) {
+	store := testkit.CreateMockStore(t)
+	tk := testkit.NewTestKit(t, store)
+	tk.MustExec("use test")
+	tk.MustExec("create table t41(id int primary key,name decimal(10,0), key idx_name(name));" +
+		"create table t43(id int primary key,name bigint, key idx_name(name));")
+	tk.MustExec("create global binding for " +
+		"select t41.* from t41,t43 where t41.name=t43.name and t41.id=1 " +
+		"using " +
+		"select /*+ cast_decimal_as_bigint('test.t41.name', 'test.t43.name'), inl_join(t43) */ t41.* from t41,t43 where t41.name=t43.name and t41.id=1;")
+	rows := tk.MustQuery("show global bindings").Rows()
+	require.Len(t, rows, 1)
+	require.Equal(t, "select `t41` . * from ( `test` . `t41` ) join `test` . `t43` where `t41` . `name` = `t43` . `name` and `t41` . `id` = ?", rows[0][0])
+	require.Equal(t, "SELECT /*+ cast_decimal_as_bigint('test.t41.name', 'test.t43.name') inl_join(`t43`)*/ `t41`.* FROM (`test`.`t41`) JOIN `test`.`t43` WHERE `t41`.`name` = `t43`.`name` AND `t41`.`id` = 1", rows[0][1])
+	tk.MustQuery("select t41.* from t41,t43 where t41.name=t43.name and t41.id=1;")
+	tk.MustQuery("select @@last_plan_from_binding").Check(testkit.Rows("1"))
+	tk.MustExec("drop global binding for select t41.* from t41,t43 where t41.name=t43.name and t41.id=1;")
+	rows = tk.MustQuery("show global bindings").Rows()
+	require.Len(t, rows, 0)
+}
