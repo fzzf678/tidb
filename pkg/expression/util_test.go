@@ -520,7 +520,7 @@ func (m *MockExpr) VecEvalJSON(ctx sessionctx.Context, input *chunk.Chunk, resul
 }
 
 func (m *MockExpr) String() string                          { return "" }
-func (m *MockExpr) MarshalJSON() ([]byte, error)            { return nil, nil }
+func (m *MockExpr) Marshal2JSON() ([]byte, error)           { return nil, nil }
 func (m *MockExpr) Eval(row chunk.Row) (types.Datum, error) { return types.NewDatum(m.i), m.err }
 func (m *MockExpr) EvalInt(ctx sessionctx.Context, row chunk.Row) (val int64, isNull bool, err error) {
 	if x, ok := m.i.(int64); ok {

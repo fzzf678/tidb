@@ -133,8 +133,8 @@ func (sf *ScalarFunction) String() string {
 	return buffer.String()
 }
 
-// MarshalJSON implements json.Marshaler interface.
-func (sf *ScalarFunction) MarshalJSON() ([]byte, error) {
+// Marshal2JSON implements json.Marshaler interface.
+func (sf *ScalarFunction) Marshal2JSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("%q", sf)), nil
 }
 

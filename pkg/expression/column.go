@@ -394,8 +394,8 @@ func (col *Column) String() string {
 	return builder.String()
 }
 
-// MarshalJSON implements json.Marshaler interface.
-func (col *Column) MarshalJSON() ([]byte, error) {
+// Marshal2JSON implements json.Marshaler interface.
+func (col *Column) Marshal2JSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("%q", col)), nil
 }
 

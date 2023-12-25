@@ -101,7 +101,7 @@ func TestScalarFunction(t *testing.T) {
 	}
 	sc := stmtctx.NewStmtCtxWithTimeZone(time.Local)
 	sf := newFunction(ast.LT, a, NewOne())
-	res, err := sf.MarshalJSON()
+	res, err := sf.Marshal2JSON()
 	require.NoError(t, err)
 	require.EqualValues(t, []byte{0x22, 0x6c, 0x74, 0x28, 0x43, 0x6f, 0x6c, 0x75, 0x6d, 0x6e, 0x23, 0x31, 0x2c, 0x20, 0x31, 0x29, 0x22}, res)
 	require.False(t, sf.IsCorrelated())

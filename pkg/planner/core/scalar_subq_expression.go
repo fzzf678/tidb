@@ -252,19 +252,19 @@ func (s *ScalarSubQueryExpr) String() string {
 	return builder.String()
 }
 
-// MarshalJSON implements the goJSON.Marshaler interface.
-func (s *ScalarSubQueryExpr) MarshalJSON() ([]byte, error) {
+// Marshal2JSON implements the goJSON.Marshaler interface.
+func (s *ScalarSubQueryExpr) Marshal2JSON() ([]byte, error) {
 	if s.evalErr != nil {
 		return nil, s.evalErr
 	}
 	if s.evaled {
-		return s.Constant.MarshalJSON()
+		return s.Constant.Marshal2JSON()
 	}
 	err := s.selfEvaluate()
 	if err != nil {
 		return nil, err
 	}
-	return s.Constant.MarshalJSON()
+	return s.Constant.Marshal2JSON()
 }
 
 // ReverseEval evaluates the only one column value with given function result.

@@ -15,7 +15,6 @@
 package expression
 
 import (
-	goJSON "encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -106,7 +105,8 @@ type TraverseAction interface {
 // Expression represents all scalar expression in SQL.
 type Expression interface {
 	fmt.Stringer
-	goJSON.Marshaler
+	//goJSON.Marshaler
+	Marshal2JSON() ([]byte, error)
 	VecExpr
 	ReverseExpr
 	CollationInfo

@@ -141,8 +141,8 @@ func (c *Constant) String() string {
 	return fmt.Sprintf("%v", c.Value.GetValue())
 }
 
-// MarshalJSON implements json.Marshaler interface.
-func (c *Constant) MarshalJSON() ([]byte, error) {
+// Marshal2JSON implements json.Marshaler interface.
+func (c *Constant) Marshal2JSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("%q", c)), nil
 }
 
