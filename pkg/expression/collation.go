@@ -15,6 +15,7 @@
 package expression
 
 import (
+	"encoding/json"
 	goatomic "sync/atomic"
 
 	"github.com/pingcap/tidb/pkg/parser/ast"
@@ -44,6 +45,51 @@ type collationInfo struct {
 
 	charset   string
 	collation string
+}
+
+// JSONCollationInfo is only used for JSON marshal/unmarshal.
+type JSONCollationInfo struct {
+	Coer       Coercibility
+	CoerInit   atomic.Bool
+	Repertoire Repertoire
+	Charset    string
+	Collation  string
+}
+
+// GetAllFields is only used for JSON marshal/unmarshal.
+func (c *collationInfo) GetAllFields() *JSONCollationInfo {
+	return &JSONCollationInfo{
+		Coer:       c.coer,
+		CoerInit:   c.coerInit,
+		Repertoire: c.repertoire,
+		Charset:    c.charset,
+		Collation:  c.collation,
+	}
+}
+
+// SetAllFields is only used for JSON marshal/unmarshal.
+func (c *collationInfo) SetAllFields(ci *JSONCollationInfo) {
+	c.coer = ci.Coer
+	c.coerInit = ci.CoerInit
+	c.repertoire = ci.Repertoire
+	c.charset = ci.Charset
+	c.collation = ci.Collation
+}
+
+// MarshalJSON implements json.Marshaler interface.
+func (c *collationInfo) MarshalJSON() ([]byte, error) {
+	return json.Marshal(c.GetAllFields())
+}
+
+// UnmarshalJSON implements json.Unmarshaler interface.
+func (c *collationInfo) UnmarshalJSON(data []byte) error {
+	ci := &JSONCollationInfo{}
+	err := json.Unmarshal(data, ci)
+	if err != nil {
+		return err
+	}
+	c.SetAllFields(ci)
+	return nil
 }
 
 func (c *collationInfo) HasCoercibility() bool {

@@ -16,6 +16,7 @@ package expression
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -258,6 +259,73 @@ type Column struct {
 	collationInfo
 
 	CorrelatedColUniqueID int64
+}
+
+// JSONColumn only use for marshal/unmarshal json
+type JSONColumn struct {
+	RetType     *types.FieldType
+	ID          int64
+	UniqueID    int64
+	Index       int
+	Hashcode    []byte
+	VirtualExpr Expression
+	OrigName    string
+	IsHidden    bool
+	IsPrefix    bool
+	InOperand   bool
+	JSONCollationInfo
+	CorrelatedColUniqueID int64
+}
+
+// GetAllFields only use for marshal/unmarshal json
+func (col *Column) GetAllFields() *JSONColumn {
+	return &JSONColumn{
+		RetType:               col.RetType,
+		ID:                    col.ID,
+		UniqueID:              col.UniqueID,
+		Index:                 col.Index,
+		Hashcode:              col.hashcode,
+		VirtualExpr:           col.VirtualExpr,
+		OrigName:              col.OrigName,
+		IsHidden:              col.IsHidden,
+		IsPrefix:              col.IsPrefix,
+		InOperand:             col.InOperand,
+		JSONCollationInfo:     *col.collationInfo.GetAllFields(),
+		CorrelatedColUniqueID: col.CorrelatedColUniqueID,
+	}
+}
+
+// SetAllFields only use for marshal/unmarshal json
+func (col *Column) SetAllFields(cf *JSONColumn) {
+	col.RetType = cf.RetType
+	col.ID = cf.ID
+	col.UniqueID = cf.UniqueID
+	col.Index = cf.Index
+	col.hashcode = cf.Hashcode
+	col.VirtualExpr = cf.VirtualExpr
+	col.OrigName = cf.OrigName
+	col.IsHidden = cf.IsHidden
+	col.IsPrefix = cf.IsPrefix
+	col.InOperand = cf.InOperand
+	col.collationInfo = collationInfo{}
+	col.collationInfo.SetAllFields(&cf.JSONCollationInfo)
+	col.CorrelatedColUniqueID = cf.CorrelatedColUniqueID
+}
+
+// MarshalJSON implements json.Marshaler interface.
+func (col *Column) MarshalJSON() ([]byte, error) {
+	return json.Marshal(col.GetAllFields())
+}
+
+// UnmarshalJSON implements json.Unmarshaler interface.
+func (col *Column) UnmarshalJSON(data []byte) error {
+	cf := &JSONColumn{}
+	err := json.Unmarshal(data, cf)
+	if err != nil {
+		return err
+	}
+	col.SetAllFields(cf)
+	return nil
 }
 
 // Equal implements Expression interface.

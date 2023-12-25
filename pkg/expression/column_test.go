@@ -15,7 +15,9 @@
 package expression
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/pingcap/tidb/pkg/parser/charset"
 	"testing"
 
 	"github.com/pingcap/tidb/pkg/parser/ast"
@@ -262,4 +264,18 @@ func TestGcColumnExprIsTidbShard(t *testing.T) {
 	// tidb_shard(a) = 1
 	shardExpr := NewFunctionInternal(ctx, ast.TiDBShard, ft, col)
 	require.True(t, GcColumnExprIsTidbShard(shardExpr))
+}
+
+func TestTestMarshalUnmarshalColumn(t *testing.T) {
+	col := &Column{RetType: types.NewFieldType(mysql.TypeLonglong), UniqueID: 1, ID: 1, hashcode: []byte{1, 2, 3}}
+	// todo: test VirtualExpr
+	col.SetCoercibility(1)
+	col.SetCharsetAndCollation(charset.CharsetUTF8MB4, charset.CollationUTF8MB4)
+	col.SetRepertoire(UNICODE)
+
+	data, err := json.Marshal(col)
+	require.NoError(t, err)
+	newCol := &Column{}
+	require.NoError(t, json.Unmarshal(data, newCol))
+	require.Equal(t, col, newCol)
 }

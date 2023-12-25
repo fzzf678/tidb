@@ -15,6 +15,7 @@
 package expression
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/pingcap/tidb/pkg/parser/ast"
@@ -762,4 +763,19 @@ func TestCompareString(t *testing.T) {
 		require.False(t, isNull)
 		require.Equal(t, int64(0), v)
 	}
+}
+
+func TestMarshalUnmarshalCollationInfo(t *testing.T) {
+	ci := &collationInfo{
+		coer:       CoercibilityExplicit,
+		repertoire: UNICODE,
+		charset:    charset.CharsetUTF8MB4,
+		collation:  charset.CollationUTF8MB4,
+	}
+	ci.SetCoercibility(CoercibilityExplicit)
+	j, err := json.Marshal(ci)
+	require.NoError(t, err)
+	ci1 := &collationInfo{}
+	require.NoError(t, json.Unmarshal(j, ci1))
+	require.Equal(t, ci, ci1)
 }
