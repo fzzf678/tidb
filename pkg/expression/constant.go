@@ -15,6 +15,7 @@
 package expression
 
 import (
+	"encoding/json"
 	"fmt"
 	"unsafe"
 
@@ -122,6 +123,43 @@ type Constant struct {
 type ParamMarker struct {
 	ctx   sessionctx.Context
 	order int
+}
+
+// JSONParamMarker only used for marshal/unmarshal JSON
+type JSONParamMarker struct {
+	Ctx   sessionctx.Context
+	Order int
+}
+
+// GetAllFields only used for marshal/unmarshal JSON
+func (d *ParamMarker) GetAllFields() *JSONParamMarker {
+	return &JSONParamMarker{
+		//Ctx:   d.ctx,
+		// todo(fzzf678): set ctx after unmarshal
+		Order: d.order,
+	}
+}
+
+// SetAllFields only used for marshal/unmarshal JSON
+func (d *ParamMarker) SetAllFields(jd *JSONParamMarker) {
+	//d.ctx = ctx
+	d.order = jd.Order
+}
+
+// MarshalJSON implements json.Marshaler interface.
+func (d *ParamMarker) MarshalJSON() ([]byte, error) {
+	return json.Marshal(d.GetAllFields())
+}
+
+// UnmarshalJSON implements json.Unmarshaler interface.
+func (d *ParamMarker) UnmarshalJSON(data []byte) error {
+	jd := &JSONParamMarker{}
+	err := json.Unmarshal(data, jd)
+	if err != nil {
+		return err
+	}
+	d.SetAllFields(jd)
+	return nil
 }
 
 // GetUserVar returns the corresponding user variable presented in the `EXECUTE` statement or `COM_EXECUTE` command.

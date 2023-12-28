@@ -514,3 +514,12 @@ func TestSpecificConstant(t *testing.T) {
 	require.Equal(t, null.RetType.GetFlen(), 1)
 	require.Equal(t, null.RetType.GetDecimal(), 0)
 }
+
+func TestMarshalUnmarshalParamMarker(t *testing.T) {
+	pm := &ParamMarker{order: 0}
+	data, err := pm.MarshalJSON()
+	require.NoError(t, err)
+	pm1 := &ParamMarker{}
+	require.NoError(t, pm1.UnmarshalJSON(data))
+	require.Equal(t, pm, pm1)
+}
