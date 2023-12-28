@@ -119,6 +119,46 @@ type Constant struct {
 	collationInfo
 }
 
+// jsonConstant only used for marshal/unmarshal JSON
+type jsonConstant struct {
+	Value        *types.Datum
+	RetType      *types.FieldType
+	DeferredExpr Expression
+	ParamMarker  *ParamMarker
+	Hashcode     []byte
+	CollInfo     *collationInfo
+}
+
+// MarshalJSON implements json.Marshaler interface.
+func (c *Constant) MarshalJSON() ([]byte, error) {
+	j := jsonConstant{
+		Value:        &c.Value,
+		RetType:      c.RetType,
+		DeferredExpr: c.DeferredExpr,
+		ParamMarker:  c.ParamMarker,
+		Hashcode:     c.hashcode,
+		CollInfo:     &c.collationInfo,
+	}
+	return json.Marshal(j)
+}
+
+// UnmarshalJSON implements json.Unmarshaler interface.
+func (c *Constant) UnmarshalJSON(data []byte) error {
+	j := jsonConstant{}
+	err := json.Unmarshal(data, &j)
+	if err != nil {
+		return err
+	}
+	c.Value = *j.Value
+	c.RetType = j.RetType
+	c.DeferredExpr = j.DeferredExpr
+	// todo(fzzf678): after Expression realize marshal/unmarshal
+	c.ParamMarker = j.ParamMarker
+	c.hashcode = j.Hashcode
+	c.collationInfo = *j.CollInfo
+	return nil
+}
+
 // ParamMarker indicates param provided by COM_STMT_EXECUTE.
 type ParamMarker struct {
 	ctx   sessionctx.Context

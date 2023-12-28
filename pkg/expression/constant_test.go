@@ -15,6 +15,7 @@
 package expression
 
 import (
+	json2 "encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/pkg/parser/ast"
+	"github.com/pingcap/tidb/pkg/parser/charset"
 	"github.com/pingcap/tidb/pkg/parser/mysql"
 	"github.com/pingcap/tidb/pkg/types"
 	"github.com/pingcap/tidb/pkg/util/chunk"
@@ -517,9 +519,25 @@ func TestSpecificConstant(t *testing.T) {
 
 func TestMarshalUnmarshalParamMarker(t *testing.T) {
 	pm := &ParamMarker{order: 0}
-	data, err := pm.MarshalJSON()
+	data, err := json2.Marshal(pm)
 	require.NoError(t, err)
 	pm1 := &ParamMarker{}
 	require.NoError(t, pm1.UnmarshalJSON(data))
 	require.Equal(t, pm, pm1)
+}
+
+func TestMarshalUnmarshalConstant(t *testing.T) {
+	c := &Constant{
+		Value:       types.NewStringDatum("asdfghjkl"),
+		RetType:     types.NewFieldType(mysql.TypeLonglong),
+		ParamMarker: &ParamMarker{order: 0},
+		hashcode:    []byte{1, 2, 3, 4, 5, 6, 7, 8},
+	}
+	c.SetCharsetAndCollation(charset.CharsetUTF8MB4, charset.CollationUTF8MB4)
+	data, err := json2.Marshal(c)
+	require.NoError(t, err)
+	fmt.Println(string(data))
+	c1 := &Constant{}
+	require.NoError(t, json2.Unmarshal(data, c1))
+	require.Equal(t, c, c1)
 }
