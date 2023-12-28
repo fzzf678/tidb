@@ -17,6 +17,7 @@ package types
 import (
 	gjson "encoding/json"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/json"
 	"math"
 	"reflect"
 	"strconv"
@@ -778,4 +779,14 @@ func BenchmarkDatumsToStringLongStr(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestMarshalUnmarshalDatum(t *testing.T) {
+	d := NewIntDatum(1)
+	data, err := json.Marshal(&d) // must be pointer
+	require.NoError(t, err)
+	fmt.Println(string(data))
+	var d1 Datum
+	require.NoError(t, json.Unmarshal(data, &d1))
+	require.Equal(t, d, d1)
 }
