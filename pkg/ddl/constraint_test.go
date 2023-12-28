@@ -16,9 +16,6 @@ package ddl_test
 
 import (
 	"fmt"
-	"testing"
-	"time"
-
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/pkg/ddl/util/callback"
 	"github.com/pingcap/tidb/pkg/parser/model"
@@ -27,6 +24,8 @@ import (
 	"github.com/pingcap/tidb/pkg/testkit"
 	"github.com/pingcap/tidb/pkg/testkit/external"
 	"github.com/stretchr/testify/require"
+	"testing"
+	"time"
 )
 
 func TestAlterConstraintAddDrop(t *testing.T) {
@@ -206,6 +205,12 @@ func TestAlterAddConstraintStateChange2(t *testing.T) {
 	tk.MustExec("alter table t drop constraint c2")
 }
 
+func TestSsda(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		TestAlterAddConstraintStateChange3(t)
+	}
+}
+
 func TestAlterAddConstraintStateChange3(t *testing.T) {
 	store, dom := testkit.CreateMockStoreAndDomain(t)
 	tk := testkit.NewTestKit(t, store)
@@ -227,11 +232,11 @@ func TestAlterAddConstraintStateChange3(t *testing.T) {
 			return
 		}
 		originalCallback.OnChanged(nil)
-		if job.SchemaState == model.StatePublic {
+		constraintTable := external.GetTableByName(t, tk1, "test", "t")
+		tableCommon, ok := constraintTable.(*tables.TableCommon)
+		require.True(t, ok)
+		if job.SchemaState == model.StatePublic && len(tableCommon.Constraints) == 1 {
 			// set constraint state
-			constraintTable := external.GetTableByName(t, tk1, "test", "t")
-			tableCommon, ok := constraintTable.(*tables.TableCommon)
-			require.True(t, ok)
 			tableCommon.Constraints[0].State = model.StateWriteReorganization
 			tableCommon.WritableConstraints = []*table.Constraint{}
 			// insert data
