@@ -277,7 +277,6 @@ func TestTestMarshalUnmarshalColumn(t *testing.T) {
 	col.SetCharsetAndCollation(charset.CharsetUTF8MB4, charset.CollationUTF8MB4)
 	col.SetRepertoire(UNICODE)
 	data, err := json.Marshal(col)
-	fmt.Println(string(data))
 	require.NoError(t, err)
 	newCol := &Column{}
 	require.NoError(t, json.Unmarshal(data, newCol))
