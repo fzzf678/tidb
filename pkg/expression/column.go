@@ -261,25 +261,25 @@ type Column struct {
 	CorrelatedColUniqueID int64
 }
 
-// JSONColumn only use for marshal/unmarshal json
-type JSONColumn struct {
-	RetType     *types.FieldType
-	ID          int64
-	UniqueID    int64
-	Index       int
-	Hashcode    []byte
-	VirtualExpr Expression
-	OrigName    string
-	IsHidden    bool
-	IsPrefix    bool
-	InOperand   bool
-	JSONCollationInfo
+// jsonColumn only use for marshal/unmarshal json
+type jsonColumn struct {
+	RetType               *types.FieldType
+	ID                    int64
+	UniqueID              int64
+	Index                 int
+	Hashcode              []byte
+	VirtualExpr           Expression
+	OrigName              string
+	IsHidden              bool
+	IsPrefix              bool
+	InOperand             bool
+	CollInfo              *collationInfo
 	CorrelatedColUniqueID int64
 }
 
-// GetAllFields only use for marshal/unmarshal json
-func (col *Column) GetAllFields() *JSONColumn {
-	return &JSONColumn{
+// MarshalJSON implements json.Marshaler interface.
+func (col *Column) MarshalJSON() ([]byte, error) {
+	j := &jsonColumn{
 		RetType:               col.RetType,
 		ID:                    col.ID,
 		UniqueID:              col.UniqueID,
@@ -290,41 +290,31 @@ func (col *Column) GetAllFields() *JSONColumn {
 		IsHidden:              col.IsHidden,
 		IsPrefix:              col.IsPrefix,
 		InOperand:             col.InOperand,
-		JSONCollationInfo:     *col.collationInfo.GetAllFields(),
+		CollInfo:              &col.collationInfo,
 		CorrelatedColUniqueID: col.CorrelatedColUniqueID,
 	}
-}
-
-// SetAllFields only use for marshal/unmarshal json
-func (col *Column) SetAllFields(cf *JSONColumn) {
-	col.RetType = cf.RetType
-	col.ID = cf.ID
-	col.UniqueID = cf.UniqueID
-	col.Index = cf.Index
-	col.hashcode = cf.Hashcode
-	col.VirtualExpr = cf.VirtualExpr
-	col.OrigName = cf.OrigName
-	col.IsHidden = cf.IsHidden
-	col.IsPrefix = cf.IsPrefix
-	col.InOperand = cf.InOperand
-	col.collationInfo = collationInfo{}
-	col.collationInfo.SetAllFields(&cf.JSONCollationInfo)
-	col.CorrelatedColUniqueID = cf.CorrelatedColUniqueID
-}
-
-// MarshalJSON implements json.Marshaler interface.
-func (col *Column) MarshalJSON() ([]byte, error) {
-	return json.Marshal(col.GetAllFields())
+	return json.Marshal(j)
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
 func (col *Column) UnmarshalJSON(data []byte) error {
-	cf := &JSONColumn{}
-	err := json.Unmarshal(data, cf)
+	j := &jsonColumn{}
+	err := json.Unmarshal(data, j)
 	if err != nil {
 		return err
 	}
-	col.SetAllFields(cf)
+	col.RetType = j.RetType
+	col.ID = j.ID
+	col.UniqueID = j.UniqueID
+	col.Index = j.Index
+	col.hashcode = j.Hashcode
+	col.VirtualExpr = j.VirtualExpr
+	col.OrigName = j.OrigName
+	col.IsHidden = j.IsHidden
+	col.IsPrefix = j.IsPrefix
+	col.InOperand = j.InOperand
+	col.collationInfo = *j.CollInfo
+	col.CorrelatedColUniqueID = j.CorrelatedColUniqueID
 	return nil
 }
 

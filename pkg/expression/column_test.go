@@ -267,13 +267,17 @@ func TestGcColumnExprIsTidbShard(t *testing.T) {
 }
 
 func TestTestMarshalUnmarshalColumn(t *testing.T) {
-	col := &Column{RetType: types.NewFieldType(mysql.TypeLonglong), UniqueID: 1, ID: 1, hashcode: []byte{1, 2, 3}}
+	col := &Column{
+		RetType:  types.NewFieldType(mysql.TypeLonglong),
+		UniqueID: 1, ID: 1,
+		hashcode: []byte{1, 2, 3},
+	}
 	// todo: test VirtualExpr
 	col.SetCoercibility(1)
 	col.SetCharsetAndCollation(charset.CharsetUTF8MB4, charset.CollationUTF8MB4)
 	col.SetRepertoire(UNICODE)
-
 	data, err := json.Marshal(col)
+	fmt.Println(string(data))
 	require.NoError(t, err)
 	newCol := &Column{}
 	require.NoError(t, json.Unmarshal(data, newCol))
