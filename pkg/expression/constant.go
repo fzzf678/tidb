@@ -165,40 +165,31 @@ type ParamMarker struct {
 	order int
 }
 
-// JSONParamMarker only used for marshal/unmarshal JSON
-type JSONParamMarker struct {
+// jsonParamMarker only used for marshal/unmarshal JSON
+type jsonParamMarker struct {
 	Ctx   sessionctx.Context
 	Order int
 }
 
-// GetAllFields only used for marshal/unmarshal JSON
-func (d *ParamMarker) GetAllFields() *JSONParamMarker {
-	return &JSONParamMarker{
+// MarshalJSON implements json.Marshaler interface.
+func (d *ParamMarker) MarshalJSON() ([]byte, error) {
+	j := &jsonParamMarker{
 		//Ctx:   d.ctx,
 		// todo(fzzf678): set ctx after unmarshal
 		Order: d.order,
 	}
-}
-
-// SetAllFields only used for marshal/unmarshal JSON
-func (d *ParamMarker) SetAllFields(jd *JSONParamMarker) {
-	//d.ctx = ctx
-	d.order = jd.Order
-}
-
-// MarshalJSON implements json.Marshaler interface.
-func (d *ParamMarker) MarshalJSON() ([]byte, error) {
-	return json.Marshal(d.GetAllFields())
+	return json.Marshal(j)
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
 func (d *ParamMarker) UnmarshalJSON(data []byte) error {
-	jd := &JSONParamMarker{}
-	err := json.Unmarshal(data, jd)
+	j := &jsonParamMarker{}
+	err := json.Unmarshal(data, j)
 	if err != nil {
 		return err
 	}
-	d.SetAllFields(jd)
+	//d.ctx = ctx
+	d.order = j.Order
 	return nil
 }
 
