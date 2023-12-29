@@ -48,7 +48,7 @@ type collationInfo struct {
 }
 
 // JSONCollationInfo is only used for JSON marshal/unmarshal.
-type JSONCollationInfo struct {
+type jsonCollationInfo struct {
 	Coer       Coercibility
 	CoerInit   atomic.Bool
 	Repertoire Repertoire
@@ -56,39 +56,30 @@ type JSONCollationInfo struct {
 	Collation  string
 }
 
-// GetAllFields is only used for JSON marshal/unmarshal.
-func (c *collationInfo) GetAllFields() *JSONCollationInfo {
-	return &JSONCollationInfo{
+// MarshalJSON implements json.Marshaler interface.
+func (c *collationInfo) MarshalJSON() ([]byte, error) {
+	j := &jsonCollationInfo{
 		Coer:       c.coer,
 		CoerInit:   c.coerInit,
 		Repertoire: c.repertoire,
 		Charset:    c.charset,
 		Collation:  c.collation,
 	}
-}
-
-// SetAllFields is only used for JSON marshal/unmarshal.
-func (c *collationInfo) SetAllFields(ci *JSONCollationInfo) {
-	c.coer = ci.Coer
-	c.coerInit = ci.CoerInit
-	c.repertoire = ci.Repertoire
-	c.charset = ci.Charset
-	c.collation = ci.Collation
-}
-
-// MarshalJSON implements json.Marshaler interface.
-func (c *collationInfo) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c.GetAllFields())
+	return json.Marshal(j)
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
 func (c *collationInfo) UnmarshalJSON(data []byte) error {
-	ci := &JSONCollationInfo{}
-	err := json.Unmarshal(data, ci)
+	j := &jsonCollationInfo{}
+	err := json.Unmarshal(data, j)
 	if err != nil {
 		return err
 	}
-	c.SetAllFields(ci)
+	c.coer = j.Coer
+	c.coerInit = j.CoerInit
+	c.repertoire = j.Repertoire
+	c.charset = j.Charset
+	c.collation = j.Collation
 	return nil
 }
 
