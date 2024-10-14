@@ -3591,6 +3591,9 @@ func (w *worker) onReorganizePartition(jobCtx *jobContext, job *model.Job) (ver 
 			}
 		})
 		job.CtxVars = []any{physicalTableIDs, newIDs}
+		failpoint.Inject("updateVersionAndTableInfoErrInStateDeleteReorganization", func() {
+			failpoint.Return(ver, errors.New("Injected error in StateDeleteReorganization"))
+		})
 		ver, err = updateVersionAndTableInfo(jobCtx, job, tblInfo, true)
 		if err != nil {
 			return ver, errors.Trace(err)

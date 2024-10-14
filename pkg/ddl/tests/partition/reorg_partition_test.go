@@ -918,3 +918,18 @@ func TestPartitionByColumnChecks(t *testing.T) {
 	tk.MustExec(`alter table rb64 partition by range(b64) (partition pMax values less than (MAXVALUE))`)
 	tk.MustExec(`insert into rb64 values ` + vals)
 }
+
+func TestPartition(t *testing.T) {
+	testfailpoint.Enable(t, "github.com/pingcap/tidb/pkg/ddl/updateVersionAndTableInfoErrInStateDeleteReorganization", `return(1)`)
+	defer func() {
+		testfailpoint.Disable(t, "github.com/pingcap/tidb/pkg/ddl/updateVersionAndTableInfoErrInStateDeleteReorganization")
+	}()
+
+	store := testkit.CreateMockStore(t)
+	tk := testkit.NewTestKit(t, store)
+	tk.MustExec("set global tidb_ddl_error_count_limit = 3")
+	tk.MustExec("use test")
+	tk.MustExec("drop table if exists t")
+	tk.MustExec("create table t (a int)")
+	tk.MustExec("alter table t partition by range(a) (partition p1 values less than (20))") // should NOT panic
+}
