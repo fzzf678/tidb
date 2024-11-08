@@ -159,7 +159,7 @@ func NewAddIndexIngestPipeline(
 	concurrency int,
 	cpMgr *ingest.CheckpointManager,
 	rowCntListener RowCountListener,
-) (*operator.AsyncPipeline, error) {
+) (*operator.AsyncPipeline, *TableScanOperator, *IndexIngestOperator, error) {
 	indexes := make([]table.Index, 0, len(idxInfos))
 	for _, idxInfo := range idxInfos {
 		index := tables.NewIndex(tbl.GetPhysicalID(), tbl.Meta(), idxInfo)
@@ -168,7 +168,7 @@ func NewAddIndexIngestPipeline(
 	reqSrc := getDDLRequestSource(model.ActionAddIndex)
 	copCtx, err := NewReorgCopContext(store, reorgMeta, tbl.Meta(), idxInfos, reqSrc)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	srcChkPool := createChunkPool(copCtx, concurrency, reorgMeta.BatchSize)
 	readerCnt, writerCnt := expectedIngestWorkerCnt(concurrency, avgRowSize)
@@ -191,7 +191,7 @@ func NewAddIndexIngestPipeline(
 
 	return operator.NewAsyncPipeline(
 		srcOp, scanOp, ingestOp, sinkOp,
-	), nil
+	), scanOp, ingestOp, nil
 }
 
 // NewWriteIndexToExternalStoragePipeline creates a pipeline for writing index to external storage.
@@ -512,6 +512,11 @@ func (o *TableScanOperator) Close() error {
 	o.logger.Info("table scan operator total count", zap.Int64("count", o.totalCount.Load()))
 	return o.AsyncOperator.Close()
 }
+
+//// Set worker number for table scan operator.
+//func (o *TableScanOperator) SetWorkerNum(workerNum int32) {
+//	o.AsyncOperator.TuneWorkerPoolSize(workerNum)
+//}
 
 type tableScanWorker struct {
 	ctx        *OperatorCtx

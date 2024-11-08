@@ -41,6 +41,11 @@ type AsyncOperator[T workerpool.TaskMayPanic, R any] struct {
 	pool *workerpool.WorkerPool[T, R]
 }
 
+// TuneWorkerPoolSize the worker number.
+func (c *AsyncOperator[T, R]) TuneWorkerPoolSize(workerNum int32) {
+	c.pool.Tune(workerNum)
+}
+
 // NewAsyncOperatorWithTransform create an AsyncOperator with a transform function.
 func NewAsyncOperatorWithTransform[T workerpool.TaskMayPanic, R any](
 	ctx context.Context,

@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/tidb/pkg/ddl/ingest"
 	"github.com/pingcap/tidb/pkg/ddl/logutil"
 	sess "github.com/pingcap/tidb/pkg/ddl/session"
+	"github.com/pingcap/tidb/pkg/ddl/systable"
 	ddlutil "github.com/pingcap/tidb/pkg/ddl/util"
 	"github.com/pingcap/tidb/pkg/disttask/operator"
 	"github.com/pingcap/tidb/pkg/expression"
@@ -750,7 +751,7 @@ func (dc *ddlCtx) runAddIndexInLocalIngestMode(
 			zap.Int64s("index IDs", indexIDs))
 		return errors.Trace(err)
 	}
-	pipe, err := NewAddIndexIngestPipeline(
+	pipe, scanOp, ingestOp, err := NewAddIndexIngestPipeline(
 		opCtx,
 		dc.store,
 		sessPool,
@@ -769,6 +770,48 @@ func (dc *ddlCtx) runAddIndexInLocalIngestMode(
 	)
 	if err != nil {
 		return err
+	}
+	sysTblMgr := systable.NewManager(sessPool)
+	if sysTblMgr != nil {
+		stopCheckingJobCancelled := make(chan struct{})
+		defer close(stopCheckingJobCancelled)
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stopCheckingJobCancelled:
+					return
+				case <-ticker.C:
+					latestJob, err := sysTblMgr.GetJobByID(opCtx, job.ID)
+					if err == systable.ErrNotFound {
+						logutil.DDLLogger().Info(
+							"admin alter: job not found, might already finished",
+							zap.Int64("job_id", job.ID))
+						return
+					}
+					if err != nil {
+						logutil.DDLLogger().Error(
+							"admin alter: get job failed, will retry later",
+							zap.Int64("job_id", job.ID), zap.Error(err))
+						continue
+					}
+					switch latestJob.State {
+					case model.JobStateRunning:
+						logutil.DDLLogger().Info("admin alter: job is running",
+							zap.Int64("job_id", job.ID))
+						concurrency := latestJob.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter()))
+						readerCnt, writerCnt := expectedIngestWorkerCnt(concurrency, avgRowSize)
+						scanOp.TuneWorkerPoolSize(int32(readerCnt))
+						ingestOp.TuneWorkerPoolSize(int32(writerCnt))
+					default:
+						logutil.DDLLogger().Info("admin alter: job is not running",
+							zap.Int64("job_id", job.ID),
+							zap.String("state", latestJob.State.String()))
+					}
+				}
+			}
+		}()
 	}
 	err = executeAndClosePipeline(opCtx, pipe)
 	if err != nil {

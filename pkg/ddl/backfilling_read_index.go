@@ -230,7 +230,7 @@ func (r *readIndexExecutor) buildLocalStorePipeline(
 		return nil, err
 	}
 	rowCntListener := newDistTaskRowCntListener(r.curRowCount, r.job.SchemaName, tbl.Meta().Name.O)
-	return NewAddIndexIngestPipeline(
+	pipe, _, _, err := NewAddIndexIngestPipeline(
 		opCtx,
 		d.store,
 		d.sessPool,
@@ -247,6 +247,7 @@ func (r *readIndexExecutor) buildLocalStorePipeline(
 		nil,
 		rowCntListener,
 	)
+	return pipe, err
 }
 
 func (r *readIndexExecutor) buildExternalStorePipeline(

@@ -185,7 +185,7 @@ func TestBackfillOperatorPipeline(t *testing.T) {
 	mockEngine := ingest.NewMockEngineInfo(nil)
 	mockEngine.SetHook(func(key, val []byte) {})
 
-	pipeline, err := ddl.NewAddIndexIngestPipeline(
+	pipeline, _, _, err := ddl.NewAddIndexIngestPipeline(
 		opCtx, store,
 		sessPool,
 		mockBackendCtx,
@@ -280,7 +280,7 @@ func TestBackfillOperatorPipelineException(t *testing.T) {
 			}
 			opCtx, cancel := ddl.NewDistTaskOperatorCtx(ctx, 1, 1)
 			defer cancel()
-			pipeline, err := ddl.NewAddIndexIngestPipeline(
+			pipeline, _, _, err := ddl.NewAddIndexIngestPipeline(
 				opCtx, store,
 				sessPool,
 				mockBackendCtx,
