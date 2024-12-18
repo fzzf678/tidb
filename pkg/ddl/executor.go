@@ -6598,7 +6598,9 @@ func (e *executor) DoDDLJobWrapper(ctx sessionctx.Context, jobW *JobWrapper) (re
 	}
 	// job.ID must be allocated after previous channel receive returns nil.
 	jobID, err := result.jobID, result.err
-	defer e.delJobDoneCh(jobID)
+	if !isDetachedJob(job) {
+		defer e.delJobDoneCh(jobID)
+	}
 	if err != nil {
 		// The transaction of enqueuing job is failed.
 		return errors.Trace(err)
@@ -6624,9 +6626,11 @@ func (e *executor) DoDDLJobWrapper(ctx sessionctx.Context, jobW *JobWrapper) (re
 	// but the session was killed before return.
 	if config.TableLockEnabled() {
 		HandleLockTablesOnSuccessSubmit(ctx, jobW)
-		defer func() {
-			HandleLockTablesOnFinish(ctx, jobW, resErr)
-		}()
+		if !isDetachedJob(job) {
+			defer func() {
+				HandleLockTablesOnFinish(ctx, jobW, resErr)
+			}()
+		}
 	}
 
 	var historyJob *model.Job
@@ -6634,6 +6638,13 @@ func (e *executor) DoDDLJobWrapper(ctx sessionctx.Context, jobW *JobWrapper) (re
 	// Attach the context of the jobId to the calling session so that
 	// KILL can cancel this DDL job.
 	ctx.GetSessionVars().StmtCtx.DDLJobID = jobID
+
+	// detach the job
+	if isDetachedJob(job) {
+		go e.waitDetachedJobDone(ctx, jobID, jobW)
+		logutil.DDLLogger().Info("DDL job is detached", zap.Int64("jobID", jobID))
+		return nil
+	}
 
 	// For a job from start to end, the state of it will be none -> delete only -> write only -> reorganization -> public
 	// For every state changes, we will wait as lease 2 * lease time, so here the ticker check is 10 * lease.
@@ -6739,6 +6750,144 @@ func (e *executor) DoDDLJobWrapper(ctx sessionctx.Context, jobW *JobWrapper) (re
 		if historyJob.Error != nil {
 			logutil.DDLLogger().Info("DDL job is failed", zap.Int64("jobID", jobID))
 			return errors.Trace(historyJob.Error)
+		}
+		panic("When the state is JobStateRollbackDone or JobStateCancelled, historyJob.Error should never be nil")
+	}
+}
+
+func isDetachedJob(job *model.Job) bool {
+	if job.Type == model.ActionAddIndex {
+		return true
+	}
+	return false
+}
+
+func (e *executor) waitDetachedJobDone(ctx sessionctx.Context, jobID int64, jobW *JobWrapper) {
+	// init var
+	ddlAction := jobW.Type
+	sessVars := ctx.GetSessionVars()
+	var historyJob *model.Job
+	var err, resErr error
+
+	// defer
+	if config.TableLockEnabled() {
+		defer func() {
+			HandleLockTablesOnFinish(ctx, jobW, resErr)
+		}()
+	}
+	defer e.delJobDoneCh(jobID)
+
+	// For a job from start to end, the state of it will be none -> delete only -> write only -> reorganization -> public
+	// For every state changes, we will wait as lease 2 * lease time, so here the ticker check is 10 * lease.
+	// But we use etcd to speed up, normally it takes less than 0.5s now, so we use 0.5s or 1s or 3s as the max value.
+	initInterval, _ := getJobCheckInterval(ddlAction, 0)
+	ticker := time.NewTicker(chooseLeaseTime(10*e.lease, initInterval))
+	startTime := time.Now()
+	metrics.JobsGauge.WithLabelValues(ddlAction.String()).Inc()
+	defer func() {
+		ticker.Stop()
+		metrics.JobsGauge.WithLabelValues(ddlAction.String()).Dec()
+		metrics.HandleJobHistogram.WithLabelValues(ddlAction.String(), metrics.RetLabel(err)).Observe(time.Since(startTime).Seconds())
+		recordLastDDLInfo(ctx, historyJob)
+	}()
+	i := 0
+	notifyCh, _ := e.getJobDoneCh(jobID)
+	for {
+		failpoint.InjectCall("storeCloseInLoop")
+		select {
+		case _, ok := <-notifyCh:
+			if !ok {
+				// when fast create enabled, jobs might be merged, and we broadcast
+				// the result by closing the channel, to avoid this loop keeps running
+				// without sleeping on retryable error, we set it to nil.
+				notifyCh = nil
+			}
+		case <-ticker.C:
+			i++
+			ticker = updateTickerInterval(ticker, 10*e.lease, ddlAction, i)
+		case <-e.ctx.Done():
+			logutil.DDLLogger().Info("DoDDLJob will quit because context done")
+			//return e.ctx.Err()
+			resErr = e.ctx.Err()
+			return
+		}
+
+		// If the connection being killed, we need to CANCEL the DDL job.
+		if sessVars.SQLKiller.HandleSignal() == exeerrors.ErrQueryInterrupted {
+			if atomic.LoadInt32(&sessVars.ConnectionStatus) == variable.ConnStatusShutdown {
+				logutil.DDLLogger().Info("DoDDLJob will quit because context done")
+				//return context.Canceled
+				resErr = context.Canceled
+				return
+			}
+			if sessVars.StmtCtx.DDLJobID != 0 {
+				se, err := e.sessPool.Get()
+				if err != nil {
+					logutil.DDLLogger().Error("get session failed, check again", zap.Error(err))
+					continue
+				}
+				sessVars.StmtCtx.DDLJobID = 0 // Avoid repeat.
+				errs, err := CancelJobsBySystem(se, []int64{jobID})
+				e.sessPool.Put(se)
+				if len(errs) > 0 {
+					logutil.DDLLogger().Warn("error canceling DDL job", zap.Error(errs[0]))
+				}
+				if err != nil {
+					logutil.DDLLogger().Warn("Kill command could not cancel DDL job", zap.Error(err))
+					continue
+				}
+			}
+		}
+
+		se, err := e.sessPool.Get()
+		if err != nil {
+			logutil.DDLLogger().Error("get session failed, check again", zap.Error(err))
+			continue
+		}
+		historyJob, err = GetHistoryJobByID(se, jobID)
+		e.sessPool.Put(se)
+		if err != nil {
+			logutil.DDLLogger().Error("get history DDL job failed, check again", zap.Error(err))
+			continue
+		}
+		if historyJob == nil {
+			logutil.DDLLogger().Debug("DDL job is not in history, maybe not run", zap.Int64("jobID", jobID))
+			continue
+		}
+
+		e.checkHistoryJobInTest(ctx, historyJob)
+
+		// If a job is a history job, the state must be JobStateSynced or JobStateRollbackDone or JobStateCancelled.
+		if historyJob.IsSynced() {
+			// Judge whether there are some warnings when executing DDL under the certain SQL mode.
+			if historyJob.ReorgMeta != nil && len(historyJob.ReorgMeta.Warnings) != 0 {
+				if len(historyJob.ReorgMeta.Warnings) != len(historyJob.ReorgMeta.WarningsCount) {
+					logutil.DDLLogger().Info("DDL warnings doesn't match the warnings count", zap.Int64("jobID", jobID))
+				} else {
+					for key, warning := range historyJob.ReorgMeta.Warnings {
+						keyCount := historyJob.ReorgMeta.WarningsCount[key]
+						if keyCount == 1 {
+							ctx.GetSessionVars().StmtCtx.AppendWarning(warning)
+						} else {
+							newMsg := fmt.Sprintf("%d warnings with this error code, first warning: "+warning.GetMsg(), keyCount)
+							newWarning := dbterror.ClassTypes.Synthesize(terror.ErrCode(warning.Code()), newMsg)
+							ctx.GetSessionVars().StmtCtx.AppendWarning(newWarning)
+						}
+					}
+				}
+			}
+			appendMultiChangeWarningsToOwnerCtx(ctx, historyJob)
+
+			logutil.DDLLogger().Info("DDL job is finished", zap.Int64("jobID", jobID))
+			//return nil
+			return
+		}
+
+		if historyJob.Error != nil {
+			logutil.DDLLogger().Info("DDL job is failed", zap.Int64("jobID", jobID))
+			//return errors.Trace(historyJob.Error)
+			resErr = errors.Trace(historyJob.Error)
+			return
 		}
 		panic("When the state is JobStateRollbackDone or JobStateCancelled, historyJob.Error should never be nil")
 	}
