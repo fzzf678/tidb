@@ -372,12 +372,13 @@ import (
 
 // 解析命令行参数
 var (
-	credentialPath = flag.String("credential", "/home/admin/credential", "Path to GCS credential file")
-	templatePath   = flag.String("template", "/home/admin/template.sql", "Path to SQL schema template")
-	concurrency    = flag.Int("concurrency", 3, "Number of concurrent goroutines for data generation and GCS upload")
-	rowCount       = flag.Int("rows", 10000, "Number of rows to generate")
-	showFile       = flag.Bool("showFile", false, "List all files in the GCS directory without generating data")
-	deleteFileName = flag.String("deleteFile", "", "Delete a specific file from GCS")
+	credentialPath   = flag.String("credential", "/home/admin/credential", "Path to GCS credential file")
+	templatePath     = flag.String("template", "/home/admin/template.sql", "Path to SQL schema template")
+	concurrency      = flag.Int("concurrency", 3, "Number of concurrent goroutines for data generation and GCS upload")
+	rowCount         = flag.Int("rows", 10000, "Number of rows to generate")
+	showFile         = flag.Bool("showFile", false, "List all files in the GCS directory without generating data")
+	deleteFileName   = flag.String("deleteFile", "", "Delete a specific file from GCS")
+	deleteAfterWrite = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
 )
 
 type Column struct {
@@ -525,7 +526,7 @@ func generateDataConcurrently(columns []Column, rowCount int, concurrency int) [
 }
 
 // 并发写入 GCS
-func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency int, credentialPath string) {
+func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency int, credentialPath string, deleteAfterWrite bool) {
 	var wg sync.WaitGroup
 	chunkSize := len(data) / concurrency
 
@@ -548,7 +549,7 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 		go func(workerID int) {
 			defer wg.Done()
 
-			fileName := fmt.Sprintf("%s.%d.sql", baseFileName, workerID)
+			fileName := fmt.Sprintf("%s.%d.csv", baseFileName, workerID)
 			writer, err := store.Create(context.Background(), fileName, nil)
 			if err != nil {
 				log.Printf("Worker %d: 创建 GCS 文件失败: %v", workerID, err)
@@ -577,6 +578,13 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 	wg.Wait()
 	endTime := time.Now()
 	log.Printf("GCS 并发写入完成，耗时: %v", endTime.Sub(startTime))
+
+	showFiles(credentialPath)
+	if deleteAfterWrite {
+		for i := 0; i < concurrency; i++ {
+			deleteFile(credentialPath, fmt.Sprintf("%s.%d.csv", baseFileName, i))
+		}
+	}
 }
 
 func deleteFile(credentialPath, fileName string) {
@@ -646,5 +654,5 @@ func main() {
 	data := generateDataConcurrently(columns, *rowCount, *concurrency)
 
 	// 并发写入 GCS
-	writeToGCSConcurrently(data, "testCSVWriter", *concurrency, *credentialPath)
+	writeToGCSConcurrently(data, "testCSVWriter", *concurrency, *credentialPath, *deleteAfterWrite)
 }
