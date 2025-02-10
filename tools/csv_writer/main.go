@@ -376,6 +376,8 @@ var (
 	templatePath   = flag.String("template", "/home/admin/template.sql", "Path to SQL schema template")
 	concurrency    = flag.Int("concurrency", 3, "Number of concurrent goroutines for data generation and GCS upload")
 	rowCount       = flag.Int("rows", 10000, "Number of rows to generate")
+	showFile       = flag.Bool("showFile", false, "List all files in the GCS directory without generating data")
+	deleteFileName = flag.String("deleteFile", "", "Delete a specific file from GCS")
 )
 
 type Column struct {
@@ -517,7 +519,7 @@ func generateDataConcurrently(columns []Column, rowCount int, concurrency int) [
 	}
 
 	endTime := time.Now()
-	log.Printf("✅ 生成随机数据完成，耗时: %v", endTime.Sub(startTime))
+	log.Printf("生成随机数据完成，耗时: %v", endTime.Sub(startTime))
 
 	return data
 }
@@ -574,13 +576,59 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 
 	wg.Wait()
 	endTime := time.Now()
-	log.Printf("✅ GCS 并发写入完成，耗时: %v", endTime.Sub(startTime))
+	log.Printf("GCS 并发写入完成，耗时: %v", endTime.Sub(startTime))
+}
+
+func deleteFile(credentialPath, fileName string) {
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: credentialPath}}
+
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
+	err = store.DeleteFile(context.Background(), fileName)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func showFiles(credentialPath string) {
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: credentialPath}}
+
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
+	store.WalkDir(context.Background(), &storage.WalkOption{SkipSubDir: true}, func(path string, size int64) error {
+		log.Printf("Name: %s, Size: %d Size/MiB: %f", path, size, float64(size)/1024/1024)
+		return nil
+	})
 }
 
 // 主函数
 func main() {
 	// 解析命令行参数
 	flag.Parse()
+
+	// 列出 GCS 目录下的文件
+	if *showFile {
+		showFiles(*credentialPath)
+		return
+	}
+
+	// 删除指定文件
+	if *deleteFileName != "" {
+		deleteFile(*credentialPath, *deleteFileName)
+		return
+	}
 
 	log.Printf("配置参数: credential=%s, template=%s, concurrency=%d, rowCount=%d",
 		*credentialPath, *templatePath, *concurrency, *rowCount)
