@@ -356,10 +356,12 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -379,6 +381,7 @@ var (
 	showFile         = flag.Bool("showFile", false, "List all files in the GCS directory without generating data")
 	deleteFileName   = flag.String("deleteFile", "", "Delete a specific file from GCS")
 	deleteAfterWrite = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
+	localPath        = flag.String("localPath", "", "Path to write local file")
 )
 
 type Column struct {
@@ -624,6 +627,32 @@ func showFiles(credentialPath string) {
 	})
 }
 
+// 写入 CSV 文件
+func writeCSV(filename string, columns []Column, data [][]string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// 写入表头
+	//headers := []string{}
+	//for _, col := range columns {
+	//	headers = append(headers, col.Name)
+	//}
+	//writer.Write(headers)
+
+	// 写入数据
+	for _, row := range data {
+		writer.Write(row)
+	}
+
+	return nil
+}
+
 // 主函数
 func main() {
 	// 解析命令行参数
@@ -657,5 +686,12 @@ func main() {
 	data := generateDataConcurrently(columns, *rowCount, *concurrency)
 
 	// 并发写入 GCS
+	if *localPath != "" {
+		err = writeCSV(*localPath, columns, data)
+		if err != nil {
+			log.Fatal("Error writing CSV:", err)
+		}
+		return
+	}
 	writeToGCSConcurrently(data, "testCSVWriter", *concurrency, *credentialPath, *deleteAfterWrite)
 }
