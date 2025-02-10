@@ -582,7 +582,10 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 	showFiles(credentialPath)
 	if deleteAfterWrite {
 		for i := 0; i < concurrency; i++ {
-			deleteFile(credentialPath, fmt.Sprintf("%s.%d.csv", baseFileName, i))
+			err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.csv", baseFileName, i))
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 }
