@@ -237,7 +237,7 @@ func pressureWriteToGCSConcurrently(data [][]string, baseFileName string, concur
 			}
 			startT := time.Now()
 			cnt := 0
-			for ; time.Now().Sub(startT) < 5*time.Minute; cnt++ {
+			for ; time.Now().Sub(startT) < 60*time.Minute; cnt++ {
 				fileName := fmt.Sprintf("%s.%d.%d.csv", baseFileName, workerID, cnt)
 				// 重试机制
 				success := false
