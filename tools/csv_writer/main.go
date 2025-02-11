@@ -1,4 +1,4 @@
-package csv_writer
+package main
 
 import (
 	"context"
