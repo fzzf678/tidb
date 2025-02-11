@@ -127,7 +127,7 @@ func generateValue(col Column) string {
 		return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", n))
 
 	case strings.HasPrefix(col.Type, "BOOLEAN"):
-		return strconv.FormatBool(gofakeit.Bool())
+		return strconv.Itoa(gofakeit.Number(0, 1))
 
 	case strings.HasPrefix(col.Type, "DATE"):
 		return gofakeit.Date().Format("2006-01-02")
