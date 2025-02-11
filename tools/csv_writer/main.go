@@ -340,7 +340,7 @@ func glanceFiles(credentialPath, fileName string) {
 }
 
 // 写入 CSV 文件
-func writeCSV(filename string, columns []Column, data [][]string) error {
+func writeCSVToLocalDisk(filename string, columns []Column, data [][]string) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -405,7 +405,7 @@ func main() {
 
 	// 并发写入 GCS
 	if *localPath != "" {
-		err = writeCSV(*localPath, columns, data)
+		err = writeCSVToLocalDisk(*localPath, columns, data)
 		if err != nil {
 			log.Fatal("Error writing CSV:", err)
 		}
