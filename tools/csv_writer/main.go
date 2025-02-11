@@ -29,6 +29,10 @@ var (
 	deleteAfterWrite = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
 	localPath        = flag.String("localPath", "", "Path to write local file")
 	glanceFile       = flag.String("glanceFile", "", "Glance the first 1024 byte of a specific file from GCS")
+	baseFileName     = flag.String("baseFileName", "testCSVWriter", "Base file name")
+	batchSize        = flag.Int("batchSize", 1000, "Number of rows to generate in each batch")
+	generatorNum     = flag.Int("generatorNum", 8, "Number of generator goroutines")
+	writerNum        = flag.Int("writerNum", 4, "Number of writer goroutines")
 )
 
 const (
@@ -366,7 +370,7 @@ func writeCSVToLocalDisk(filename string, columns []Column, data [][]string) err
 }
 
 // 主函数
-func main() {
+func mainOld() {
 	// 解析命令行参数
 	flag.Parse()
 
@@ -412,4 +416,114 @@ func main() {
 		return
 	}
 	writeToGCSConcurrently(data, "testCSVWriter", *concurrency, *credentialPath, *deleteAfterWrite)
+}
+
+func main() {
+	// 解析命令行参数
+	flag.Parse()
+
+	// 列出 GCS 目录下的文件
+	if *showFile {
+		showFiles(*credentialPath)
+		return
+	}
+
+	// 删除指定文件
+	if *deleteFileName != "" {
+		deleteFile(*credentialPath, *deleteFileName)
+		return
+	}
+
+	// 读取指定文件前 1024 字节
+	if *glanceFile != "" {
+		glanceFiles(*credentialPath, *glanceFile)
+		return
+	}
+
+	log.Printf("配置参数: credential=%s, template=%s, concurrency=%d, rowCount=%d",
+		*credentialPath, *templatePath, *concurrency, *rowCount)
+
+	// 读取 SQL Schema
+	sqlSchema, err := readSQLFile(*templatePath)
+	if err != nil {
+		log.Fatalf("读取 SQL 模板失败: %v", err)
+	}
+
+	// 解析 Schema
+	columns := parseSQLSchema(sqlSchema)
+
+	if *rowCount <= 0 || *batchSize <= 0 {
+		log.Fatal("总数和每个批次的数量必须大于 0")
+	}
+
+	// 计算任务数量
+	taskCount := (*rowCount + *batchSize - 1) / *batchSize
+	log.Printf("总共将生成 %d 个任务，每个任务最多生成 %d 个随机字符串", taskCount, *batchSize)
+
+	// 创建任务和结果的 channel
+	tasksCh := make(chan Task, taskCount)
+	resultsCh := make(chan Result, taskCount)
+
+	// 建立一个 sync.Pool 用于复用 []string 切片，初始容量为 batchSize
+	pool := &sync.Pool{
+		New: func() interface{} {
+			return make([][]string, *batchSize)
+		},
+	}
+
+	var wgGen sync.WaitGroup
+	// 启动 generator worker
+	for i := 0; i < *generatorNum; i++ {
+		wgGen.Add(1)
+		go generatorWorker(tasksCh, resultsCh, i, pool, &wgGen)
+	}
+
+	var wgWriter sync.WaitGroup
+	// 启动 writer worker
+	for i := 0; i < *writerNum; i++ {
+		wgWriter.Add(1)
+		go writerWorker(resultsCh, i, pool, &wgWriter)
+	}
+
+	// 将任务按照 [begin, end) 的范围进行分解，并发送到 tasksCh
+	taskID := 0
+	currentIndex := 0
+	var fileNames []string
+
+	for currentIndex < *rowCount {
+		begin := currentIndex
+		end := currentIndex + *batchSize
+		if end > *rowCount {
+			end = *rowCount
+		}
+		csvFileName := fmt.Sprintf("%s.%d.csv", *baseFileName, taskID)
+		fileNames = append(fileNames, csvFileName)
+		task := Task{
+			id:       taskID,
+			begin:    begin,
+			end:      end,
+			cols:     columns,
+			fileName: csvFileName,
+		}
+		tasksCh <- task
+		taskID++
+		currentIndex = end
+	}
+	close(tasksCh) // 任务分发完毕后关闭 tasksCh
+
+	// 等待所有 generator 完成后关闭 resultsCh
+	wgGen.Wait()
+	close(resultsCh)
+
+	// 等待所有 writer 完成写入
+	wgWriter.Wait()
+
+	if *deleteAfterWrite {
+		for _, fileName := range fileNames {
+			deleteFile(*credentialPath, fileName)
+		}
+		log.Printf("delete all files after write")
+	}
+
+	log.Printf("Done！")
 }
