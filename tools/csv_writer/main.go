@@ -20,16 +20,17 @@ import (
 
 // 解析命令行参数
 var (
-	credentialPath   = flag.String("credential", "/home/admin/credential", "Path to GCS credential file")
-	templatePath     = flag.String("template", "/home/admin/template.sql", "Path to SQL schema template")
-	concurrency      = flag.Int("concurrency", 3, "Number of concurrent goroutines for data generation and GCS upload")
-	rowCount         = flag.Int("rows", 10000, "Number of rows to generate")
-	showFile         = flag.Bool("showFile", false, "List all files in the GCS directory without generating data")
-	deleteFileName   = flag.String("deleteFile", "", "Delete a specific file from GCS")
-	deleteAfterWrite = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
-	localPath        = flag.String("localPath", "", "Path to write local file")
-	glanceFile       = flag.String("glanceFile", "", "Glance the first 1024 byte of a specific file from GCS")
-	baseFileName     = flag.String("baseFileName", "testCSVWriter", "Base file name")
+	credentialPath      = flag.String("credential", "/home/admin/credential", "Path to GCS credential file")
+	templatePath        = flag.String("template", "/home/admin/template.sql", "Path to SQL schema template")
+	concurrency         = flag.Int("concurrency", 3, "Number of concurrent goroutines for data generation and GCS upload")
+	rowCount            = flag.Int("rows", 10000, "Number of rows to generate")
+	duplicateWriteTimes = flag.Int("duplicateWriteTimes", 1, "Number of rows to generate")
+	showFile            = flag.Bool("showFile", false, "List all files in the GCS directory without generating data")
+	deleteFileName      = flag.String("deleteFile", "", "Delete a specific file from GCS")
+	deleteAfterWrite    = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
+	localPath           = flag.String("localPath", "", "Path to write local file")
+	glanceFile          = flag.String("glanceFile", "", "Glance the first 1024 byte of a specific file from GCS")
+	baseFileName        = flag.String("baseFileName", "testCSVWriter", "Base file name")
 
 	batchSize    = flag.Int("batchSize", 1000, "Number of rows to generate in each batch")
 	generatorNum = flag.Int("generatorNum", 8, "Number of generator goroutines")
@@ -37,8 +38,7 @@ var (
 )
 
 const (
-	maxRetries          = 3 // 最大重试次数
-	duplicateWriteTimes = 3 // 重复写入次数
+	maxRetries = 3 // 最大重试次数
 )
 
 type Column struct {
@@ -233,7 +233,7 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 			if workerID == concurrency-1 {
 				end = len(data)
 			}
-			for j := 0; j < duplicateWriteTimes; j++ {
+			for j := 0; j < *duplicateWriteTimes; j++ {
 				fileName := fmt.Sprintf("%s.%d.%d.csv", baseFileName, workerID, j)
 				// 重试机制
 				success := false
@@ -268,7 +268,7 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 	showFiles(credentialPath)
 	if deleteAfterWrite {
 		for i := 0; i < concurrency; i++ {
-			for j := 0; j < duplicateWriteTimes; j++ {
+			for j := 0; j < *duplicateWriteTimes; j++ {
 				err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.%d.csv", baseFileName, i, j))
 				if err != nil {
 					panic(err)
