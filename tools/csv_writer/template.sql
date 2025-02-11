@@ -8,5 +8,5 @@ CREATE TABLE `users` (
     `join_date` date DEFAULT NULL,
     `last_login` timestamp NULL DEFAULT NULL,
     `role` enum('admin','user','guest') DEFAULT NULL,
-    `alive` boolean DEFAULT NULL,
+    `alive` boolean DEFAULT NULL
 )
