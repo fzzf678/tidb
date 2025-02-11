@@ -243,7 +243,7 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 					err := writeDataToGCS(store, fileName, data[start:end])
 					if err == nil {
 						success = true
-						log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, end-start)
+						//log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, end-start)
 						break
 					}
 
@@ -264,7 +264,7 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 			for j := 0; j <= cnt; j++ {
 				err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.%d.csv", baseFileName, workerID, j))
 				if err != nil {
-					panic(err)
+					log.Printf("Worker %d: 删除文件失败 %s (%d 行)", workerID, fmt.Sprintf("%s.%d.%d.csv", baseFileName, workerID, j), end-start)
 				}
 			}
 		}(i)
@@ -413,8 +413,36 @@ func showWriteSpeed(ctx context.Context, wg sync.WaitGroup) {
 	}
 }
 
+func deleteAllFilesByPrefix() {
+	var fileNames []string
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: *credentialPath}}
+
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
+	store.WalkDir(context.Background(), &storage.WalkOption{SkipSubDir: true}, func(path string, size int64) error {
+		if strings.HasPrefix(path, "testCSVWriter") {
+			fileNames = append(fileNames, path)
+		}
+		return nil
+	})
+	for _, fileName := range fileNames {
+		err = store.DeleteFile(context.Background(), fileName)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
 // 主函数
 func main() {
+	deleteAllFilesByPrefix()
+
 	// 解析命令行参数
 	flag.Parse()
 
