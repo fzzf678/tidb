@@ -486,6 +486,7 @@ func main() {
 	}
 
 	// 将任务按照 [begin, end) 的范围进行分解，并发送到 tasksCh
+	startTime := time.Now()
 	taskID := 0
 	currentIndex := 0
 	var fileNames []string
@@ -517,6 +518,8 @@ func main() {
 
 	// 等待所有 writer 完成写入
 	wgWriter.Wait()
+	log.Printf("写入 GCS 完成，耗时: %v", time.Since(startTime))
+	showFiles(*credentialPath)
 
 	if *deleteAfterWrite {
 		for _, fileName := range fileNames {
