@@ -31,6 +31,7 @@ var (
 	localPath           = flag.String("localPath", "", "Path to write local file")
 	glanceFile          = flag.String("glanceFile", "", "Glance the first 1024 byte of a specific file from GCS")
 	baseFileName        = flag.String("baseFileName", "testCSVWriter", "Base file name")
+	deletePrefixFile    = flag.String("deletePrefixFile", "", "Delete all files with prefix")
 
 	batchSize    = flag.Int("batchSize", 1000, "Number of rows to generate in each batch")
 	generatorNum = flag.Int("generatorNum", 8, "Number of generator goroutines")
@@ -413,7 +414,7 @@ func showWriteSpeed(ctx context.Context, wg sync.WaitGroup) {
 	}
 }
 
-func deleteAllFilesByPrefix() {
+func deleteAllFilesByPrefix(prefix string) {
 	var fileNames []string
 	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: *credentialPath}}
 
@@ -426,7 +427,7 @@ func deleteAllFilesByPrefix() {
 		panic(err)
 	}
 	store.WalkDir(context.Background(), &storage.WalkOption{SkipSubDir: true}, func(path string, size int64) error {
-		if strings.HasPrefix(path, "testCSVWriter") {
+		if strings.HasPrefix(path, prefix) {
 			fileNames = append(fileNames, path)
 		}
 		return nil
@@ -441,8 +442,6 @@ func deleteAllFilesByPrefix() {
 
 // 主函数
 func main() {
-	deleteAllFilesByPrefix()
-
 	// 解析命令行参数
 	flag.Parse()
 
@@ -462,6 +461,11 @@ func main() {
 	if *glanceFile != "" {
 		glanceFiles(*credentialPath, *glanceFile)
 		return
+	}
+
+	// 删除所有文件
+	if *deletePrefixFile != "" {
+		deleteAllFilesByPrefix(*deletePrefixFile)
 	}
 
 	log.Printf("配置参数: credential=%s, template=%s, concurrency=%d, rowCount=%d",
