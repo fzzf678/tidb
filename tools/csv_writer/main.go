@@ -28,7 +28,7 @@ var (
 	deleteFileName   = flag.String("deleteFile", "", "Delete a specific file from GCS")
 	deleteAfterWrite = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
 	localPath        = flag.String("localPath", "", "Path to write local file")
-	glanceFile       = flag.String("glanceFile", "testCSVWriter.0.csv", "Glance the first 1024 byte of a specific file from GCS")
+	glanceFile       = flag.String("glanceFile", "", "Glance the first 1024 byte of a specific file from GCS")
 )
 
 const (
