@@ -133,7 +133,10 @@ func generateValue(col Column) string {
 		return gofakeit.Date().Format("2006-01-02")
 
 	case strings.HasPrefix(col.Type, "DATETIME"), strings.HasPrefix(col.Type, "TIMESTAMP"):
-		return gofakeit.Date().Format("2006-01-02 15:04:05")
+		start := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+		end := time.Now() // 取当前时间
+		randomTime := gofakeit.DateRange(start, end)
+		return randomTime.Format("2006-01-02 15:04:05")
 
 	case strings.HasPrefix(col.Type, "ENUM") && len(col.Enum) > 0:
 		return col.Enum[gofakeit.Number(0, len(col.Enum)-1)]
