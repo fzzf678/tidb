@@ -29,7 +29,7 @@ var (
 	deleteFileName      = flag.String("deleteFile", "", "Delete a specific file from GCS")
 	deleteAfterWrite    = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
 	localPath           = flag.String("localPath", "", "Path to write local file")
-	glanceFile          = flag.String("glanceFile", "", "Glance the first 1024 byte of a specific file from GCS")
+	glanceFile          = flag.String("glanceFile", "", "Glance the first 128*1024 byte of a specific file from GCS")
 	baseFileName        = flag.String("baseFileName", "testCSVWriter", "Base file name")
 	deletePrefixFile    = flag.String("deletePrefixFile", "", "Delete all files with prefix")
 
@@ -353,7 +353,7 @@ func glanceFiles(credentialPath, fileName string) {
 	}
 
 	r, _ := store.Open(context.Background(), fileName, nil)
-	b := make([]byte, 1024)
+	b := make([]byte, 128*1024)
 	r.Read(b)
 
 	fmt.Println(string(b))
