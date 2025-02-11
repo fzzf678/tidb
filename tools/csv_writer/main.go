@@ -450,19 +450,27 @@ func showWriteSpeed(ctx context.Context, wg sync.WaitGroup) {
 	}
 	t := time.NewTicker(60 * time.Second)
 	lastFileNum := 0
+	lastTime := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			curFileNum := 0
+			curSize := 0.0 // MiB
 			store.WalkDir(context.Background(), &storage.WalkOption{SkipSubDir: true}, func(path string, size int64) error {
 				curFileNum++
+				curSize += float64(size) / 1024 / 1024
 				return nil
 			})
-			log.Printf("Time: %s,Total file number: %d, Increase: %d, WriteSpeed: %f MiB/s", time.Now().Format("2006-01-02 15:04:05"),
-				curFileNum, curFileNum-lastFileNum, 275.91*float64(curFileNum-lastFileNum)/60)
+			if curFileNum > lastFileNum {
+				timeDiff := time.Since(lastTime).Seconds()
+				writeSpeed := (curSize - float64(lastFileNum)) / timeDiff
+				log.Printf("Time: %s, Total files: %d, Files added: %d, WriteSpeed: %.2f MiB/s",
+					time.Now().Format("2006-01-02 15:04:05"), curFileNum, curFileNum-lastFileNum, writeSpeed)
+			}
 			lastFileNum = curFileNum
+			lastTime = time.Now()
 		}
 	}
 }
