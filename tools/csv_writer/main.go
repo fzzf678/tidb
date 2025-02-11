@@ -233,8 +233,10 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 			if workerID == concurrency-1 {
 				end = len(data)
 			}
-			for j := 0; j < *duplicateWriteTimes; j++ {
-				fileName := fmt.Sprintf("%s.%d.%d.csv", baseFileName, workerID, j)
+			startT := time.Now()
+			cnt := 0
+			for ; time.Now().Sub(startT) < 5*time.Minute; cnt++ {
+				fileName := fmt.Sprintf("%s.%d.%d.csv", baseFileName, workerID, cnt)
 				// 重试机制
 				success := false
 				for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -258,24 +260,30 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 					log.Printf("Worker %d: 最终写入失败 %s (%d 行)", workerID, fileName, end-start)
 				}
 			}
-		}(i)
-	}
-
-	wg.Wait()
-	endTime := time.Now()
-	log.Printf("GCS 并发写入完成，耗时: %v", endTime.Sub(startTime))
-
-	showFiles(credentialPath)
-	if deleteAfterWrite {
-		for i := 0; i < concurrency; i++ {
-			for j := 0; j < *duplicateWriteTimes; j++ {
-				err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.%d.csv", baseFileName, i, j))
+			// clean file after test
+			for j := 0; j <= cnt; j++ {
+				err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.%d.csv", baseFileName, workerID, j))
 				if err != nil {
 					panic(err)
 				}
 			}
-		}
+		}(i)
 	}
+
+	wg.Wait()
+	log.Printf("GCS 并发写入完成，耗时: %v", time.Now().Sub(startTime))
+
+	//showFiles(credentialPath)
+	//if deleteAfterWrite {
+	//	for i := 0; i < concurrency; i++ {
+	//		for j := 0; j < *duplicateWriteTimes; j++ {
+	//			err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.%d.csv", baseFileName, i, j))
+	//			if err != nil {
+	//				panic(err)
+	//			}
+	//		}
+	//	}
+	//}
 }
 
 // 带重试的 GCS 写入封装
@@ -376,6 +384,35 @@ func writeCSVToLocalDisk(filename string, columns []Column, data [][]string) err
 	return nil
 }
 
+func showWriteSpeed(ctx context.Context, wg sync.WaitGroup) {
+	defer wg.Done()
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: *credentialPath}}
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
+	t := time.NewTicker(60 * time.Second)
+	fileNum := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			lastFileNum := fileNum
+			store.WalkDir(context.Background(), &storage.WalkOption{SkipSubDir: true}, func(path string, size int64) error {
+				fileNum++
+				return nil
+			})
+			log.Printf("Total file number: %d, increase: %d, writeSpeed: %f MiB/s",
+				fileNum, fileNum-lastFileNum, 275.91*float64(fileNum-lastFileNum)/60)
+		}
+	}
+}
+
 // 主函数
 func main() {
 	// 解析命令行参数
@@ -422,7 +459,16 @@ func main() {
 		}
 		return
 	}
+
+	wgS := sync.WaitGroup{}
+	ctx, cancel := context.WithCancel(context.Background())
+	wgS.Add(1)
+	go showWriteSpeed(ctx, wgS)
+
 	writeToGCSConcurrently(data, "testCSVWriter", *concurrency, *credentialPath, *deleteAfterWrite)
+
+	cancel()
+	wgS.Wait()
 }
 
 func mainNew() {
