@@ -466,6 +466,7 @@ func main() {
 	// 删除所有文件
 	if *deletePrefixFile != "" {
 		deleteAllFilesByPrefix(*deletePrefixFile)
+		return
 	}
 
 	log.Printf("配置参数: credential=%s, template=%s, concurrency=%d, rowCount=%d",
