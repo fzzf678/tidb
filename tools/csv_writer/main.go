@@ -30,13 +30,15 @@ var (
 	localPath        = flag.String("localPath", "", "Path to write local file")
 	glanceFile       = flag.String("glanceFile", "", "Glance the first 1024 byte of a specific file from GCS")
 	baseFileName     = flag.String("baseFileName", "testCSVWriter", "Base file name")
-	batchSize        = flag.Int("batchSize", 1000, "Number of rows to generate in each batch")
-	generatorNum     = flag.Int("generatorNum", 8, "Number of generator goroutines")
-	writerNum        = flag.Int("writerNum", 4, "Number of writer goroutines")
+
+	batchSize    = flag.Int("batchSize", 1000, "Number of rows to generate in each batch")
+	generatorNum = flag.Int("generatorNum", 8, "Number of generator goroutines")
+	writerNum    = flag.Int("writerNum", 4, "Number of writer goroutines")
 )
 
 const (
-	maxRetries = 3 // 最大重试次数
+	maxRetries          = 3 // 最大重试次数
+	duplicateWriteTimes = 3 // 重复写入次数
 )
 
 type Column struct {
@@ -226,33 +228,36 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 
 		go func(workerID int) {
 			defer wg.Done()
-
-			fileName := fmt.Sprintf("%s.%d.csv", baseFileName, workerID)
 			start := workerID * chunkSize
 			end := start + chunkSize
 			if workerID == concurrency-1 {
 				end = len(data)
 			}
+			for j := 0; j < duplicateWriteTimes; j++ {
+				fileName := fmt.Sprintf("%s.%d.%d.csv", baseFileName, workerID, j)
+				// 重试机制
+				success := false
+				for attempt := 1; attempt <= maxRetries; attempt++ {
+					err := writeDataToGCS(store, fileName, data[start:end])
+					if err == nil {
+						success = true
+						log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, end-start)
+						break
+					}
 
-			// 重试机制
-			for attempt := 1; attempt <= maxRetries; attempt++ {
-				err := writeDataToGCS(store, fileName, data[start:end])
-				if err == nil {
-					log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, end-start)
-					return
+					log.Printf("Worker %d: 第 %d 次写入 GCS 失败: %v", workerID, attempt, err)
+
+					// 指数退避策略：等待 `2^(attempt-1) * 100ms`（最大不超过 5s）
+					waitTime := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
+					if waitTime > 4*time.Second {
+						waitTime = 4 * time.Second
+					}
+					time.Sleep(waitTime + time.Duration(rand.Intn(500))*time.Millisecond) // 额外加一点随机时间，避免同时重试
 				}
-
-				log.Printf("Worker %d: 第 %d 次写入 GCS 失败: %v", workerID, attempt, err)
-
-				// 指数退避策略：等待 `2^(attempt-1) * 100ms`（最大不超过 5s）
-				waitTime := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
-				if waitTime > 4*time.Second {
-					waitTime = 4 * time.Second
+				if !success {
+					log.Printf("Worker %d: 最终写入失败 %s (%d 行)", workerID, fileName, end-start)
 				}
-				time.Sleep(waitTime + time.Duration(rand.Intn(500))*time.Millisecond) // 额外加一点随机时间，避免同时重试
 			}
-
-			log.Printf("Worker %d: 最终写入失败 %s (%d 行)", workerID, fileName, end-start)
 		}(i)
 	}
 
@@ -263,9 +268,11 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 	showFiles(credentialPath)
 	if deleteAfterWrite {
 		for i := 0; i < concurrency; i++ {
-			err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.csv", baseFileName, i))
-			if err != nil {
-				panic(err)
+			for j := 0; j < duplicateWriteTimes; j++ {
+				err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.%d.csv", baseFileName, i, j))
+				if err != nil {
+					panic(err)
+				}
 			}
 		}
 	}
@@ -370,7 +377,7 @@ func writeCSVToLocalDisk(filename string, columns []Column, data [][]string) err
 }
 
 // 主函数
-func mainOld() {
+func main() {
 	// 解析命令行参数
 	flag.Parse()
 
@@ -418,7 +425,7 @@ func mainOld() {
 	writeToGCSConcurrently(data, "testCSVWriter", *concurrency, *credentialPath, *deleteAfterWrite)
 }
 
-func main() {
+func mainNew() {
 	// 解析命令行参数
 	flag.Parse()
 
@@ -458,7 +465,7 @@ func main() {
 
 	// 计算任务数量
 	taskCount := (*rowCount + *batchSize - 1) / *batchSize
-	log.Printf("总共将生成 %d 个任务，每个任务最多生成 %d 个随机字符串", taskCount, *batchSize)
+	log.Printf("总共将生成 %d 个任务，每个任务最多生成 %d 行", taskCount, *batchSize)
 
 	// 创建任务和结果的 channel
 	tasksCh := make(chan Task, taskCount)
