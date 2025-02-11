@@ -527,3 +527,95 @@ func main() {
 
 	log.Printf("Done！")
 }
+
+// Task 表示一个任务，使用 [begin, end) 表示任务需要生成的随机字符串数量
+type Task struct {
+	id       int
+	begin    int
+	end      int
+	cols     []Column
+	fileName string
+}
+
+// Result 表示生成结果，包含任务 id 以及生成的随机字符串集合
+type Result struct {
+	id       int
+	fileName string
+	values   [][]string
+}
+
+// generatorWorker 从 tasksCh 中获取任务，使用 sync.Pool 复用 []string 切片，生成随机字符串后发送到 resultsCh
+func generatorWorker(tasksCh <-chan Task, resultsCh chan<- Result, workerID int, pool *sync.Pool, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for task := range tasksCh {
+		count := task.end - task.begin
+		// 尝试从池中获取一个 [][]string 切片
+		buf := pool.Get().([][]string)
+		if cap(buf) < count {
+			buf = make([][]string, count)
+		}
+		// 设定切片长度为 count
+		values := buf[:count]
+
+		log.Printf("Generator %d: 处理任务 %d, 范围 [%d, %d)，生成 %d 个随机字符串", workerID, task.id, task.begin, task.end, count)
+		for i := 0; i < count; i++ {
+			var row []string
+			for _, col := range task.cols {
+				row = append(row, generateValue(col))
+			}
+			values[i] = row
+		}
+		resultsCh <- Result{id: task.id, values: values, fileName: task.fileName}
+	}
+}
+
+// writerWorker 从 resultsCh 中获取生成结果，并写入 CSV 文件后将使用完的切片放回 pool
+func writerWorker(resultsCh <-chan Result, workerID int, pool *sync.Pool, wg *sync.WaitGroup) {
+	defer wg.Done()
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: *credentialPath}}
+
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
+
+	for result := range resultsCh {
+		success := false
+		fileName := result.fileName
+		// 重试机制
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if *localPath != "" {
+				err = writeCSVToLocalDisk(*localPath+fileName, nil, result.values)
+				if err != nil {
+					log.Fatal("Error writing CSV:", err)
+				}
+			} else {
+				err = writeDataToGCS(store, fileName, result.values)
+			}
+			if err == nil {
+				log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, len(result.values))
+				success = true
+				break
+			}
+
+			log.Printf("Worker %d: 第 %d 次写入 GCS 失败: %v", workerID, attempt, err)
+
+			// 指数退避策略：等待 `2^(attempt-1) * 100ms`（最大不超过 5s）
+			waitTime := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
+			if waitTime > 4*time.Second {
+				waitTime = 4 * time.Second
+			}
+			time.Sleep(waitTime + time.Duration(rand.Intn(500))*time.Millisecond) // 额外加一点随机时间，避免同时重试
+		}
+		if !success {
+			log.Printf("Worker %d: 最终写入失败 %s (%d 行)", workerID, fileName, len(result.values))
+		}
+
+		// 将使用完的切片放回 pool 供后续复用
+		pool.Put(result.values)
+	}
+}
