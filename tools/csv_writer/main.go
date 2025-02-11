@@ -28,6 +28,7 @@ var (
 	deleteFileName   = flag.String("deleteFile", "", "Delete a specific file from GCS")
 	deleteAfterWrite = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
 	localPath        = flag.String("localPath", "", "Path to write local file")
+	glanceFile       = flag.String("glanceFile", "testCSVWriter.0.csv", "Glance the first 1024 byte of a specific file from GCS")
 )
 
 const (
@@ -319,6 +320,25 @@ func showFiles(credentialPath string) {
 	})
 }
 
+func glanceFiles(credentialPath, fileName string) {
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: credentialPath}}
+
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
+
+	r, _ := store.Open(context.Background(), fileName, nil)
+	b := make([]byte, 1024)
+	r.Read(b)
+
+	fmt.Println(string(b))
+}
+
 // 写入 CSV 文件
 func writeCSV(filename string, columns []Column, data [][]string) error {
 	file, err := os.Create(filename)
@@ -359,6 +379,12 @@ func main() {
 	// 删除指定文件
 	if *deleteFileName != "" {
 		deleteFile(*credentialPath, *deleteFileName)
+		return
+	}
+
+	// 读取指定文件前 1024 字节
+	if *glanceFile != "" {
+		glanceFiles(*credentialPath, *glanceFile)
 		return
 	}
 
