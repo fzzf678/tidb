@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,10 @@ var (
 	deleteFileName   = flag.String("deleteFile", "", "Delete a specific file from GCS")
 	deleteAfterWrite = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
 	localPath        = flag.String("localPath", "", "Path to write local file")
+)
+
+const (
+	maxRetries = 3 // 最大重试次数
 )
 
 type Column struct {
@@ -215,28 +220,31 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 			defer wg.Done()
 
 			fileName := fmt.Sprintf("%s.%d.csv", baseFileName, workerID)
-			writer, err := store.Create(context.Background(), fileName, nil)
-			if err != nil {
-				log.Printf("Worker %d: 创建 GCS 文件失败: %v", workerID, err)
-				return
-			}
-
 			start := workerID * chunkSize
 			end := start + chunkSize
 			if workerID == concurrency-1 {
 				end = len(data)
 			}
 
-			for _, row := range data[start:end] {
-				_, err = writer.Write(context.Background(), []byte(strings.Join(row, ",")+"\n"))
-				if err != nil {
-					log.Printf("Worker %d: 写入 GCS 失败: %v", workerID, err)
+			// 重试机制
+			for attempt := 1; attempt <= maxRetries; attempt++ {
+				err := writeDataToGCS(store, fileName, data[start:end])
+				if err == nil {
+					log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, end-start)
 					return
 				}
-			}
-			writer.Close(context.Background())
 
-			log.Printf("Worker %d: 完成写入 %s (%d 行)", workerID, fileName, end-start)
+				log.Printf("Worker %d: 第 %d 次写入 GCS 失败: %v", workerID, attempt, err)
+
+				// 指数退避策略：等待 `2^(attempt-1) * 100ms`（最大不超过 5s）
+				waitTime := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
+				if waitTime > 4*time.Second {
+					waitTime = 4 * time.Second
+				}
+				time.Sleep(waitTime + time.Duration(rand.Intn(500))*time.Millisecond) // 额外加一点随机时间，避免同时重试
+			}
+
+			log.Printf("Worker %d: 最终写入失败 %s (%d 行)", workerID, fileName, end-start)
 		}(i)
 	}
 
@@ -253,6 +261,25 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 			}
 		}
 	}
+}
+
+// 带重试的 GCS 写入封装
+func writeDataToGCS(store storage.ExternalStorage, fileName string, data [][]string) error {
+	writer, err := store.Create(context.Background(), fileName, nil)
+	if err != nil {
+		return fmt.Errorf("创建 GCS 文件失败: %w", err)
+	}
+	defer writer.Close(context.Background())
+
+	for _, row := range data {
+		_, err = writer.Write(context.Background(), []byte(strings.Join(row, ",")+"\n"))
+		if err != nil {
+			log.Printf("写入 GCS 失败，删除文件: %s", fileName)
+			store.DeleteFile(context.Background(), fileName) // 删除已创建的文件
+			return fmt.Errorf("写入 GCS 失败: %w", err)
+		}
+	}
+	return nil
 }
 
 func deleteFile(credentialPath, fileName string) {
