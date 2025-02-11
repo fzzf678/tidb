@@ -30,8 +30,9 @@ var (
 	deleteAfterWrite    = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
 	localPath           = flag.String("localPath", "", "Path to write local file")
 	glanceFile          = flag.String("glanceFile", "", "Glance the first 128*1024 byte of a specific file from GCS")
-	baseFileName        = flag.String("baseFileName", "testCSVWriter", "Base file name")
+	fileNamePrefix      = flag.String("fileNamePrefix", "testCSVWriter", "Base file name")
 	deletePrefixFile    = flag.String("deletePrefixFile", "", "Delete all files with prefix")
+	testLongTimeWrite   = flag.Bool("testLongTimeWrite", false, "Test long time write")
 
 	batchSize    = flag.Int("batchSize", 1000, "Number of rows to generate in each batch")
 	generatorNum = flag.Int("generatorNum", 8, "Number of generator goroutines")
@@ -206,8 +207,8 @@ func generateDataConcurrently(columns []Column, rowCount int, concurrency int) [
 	return data
 }
 
-// 并发写入 GCS
-func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency int, credentialPath string, deleteAfterWrite bool) {
+// 长时间并发写入 GCS
+func pressureWriteToGCSConcurrently(data [][]string, baseFileName string, concurrency int, credentialPath string) {
 	var wg sync.WaitGroup
 	chunkSize := len(data) / concurrency
 
@@ -273,18 +274,69 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 
 	wg.Wait()
 	log.Printf("GCS 并发写入完成，耗时: %v", time.Now().Sub(startTime))
+}
 
-	//showFiles(credentialPath)
-	//if deleteAfterWrite {
-	//	for i := 0; i < concurrency; i++ {
-	//		for j := 0; j < *duplicateWriteTimes; j++ {
-	//			err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.%d.csv", baseFileName, i, j))
-	//			if err != nil {
-	//				panic(err)
-	//			}
-	//		}
-	//	}
-	//}
+// 并发写入 GCS
+func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency int, credentialPath string) {
+	var wg sync.WaitGroup
+	chunkSize := len(data) / concurrency
+
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: credentialPath}}
+
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
+
+	startTime := time.Now()
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+
+		go func(workerID int) {
+			defer wg.Done()
+			start := workerID * chunkSize
+			end := start + chunkSize
+			if workerID == concurrency-1 {
+				end = len(data)
+			}
+			fileName := fmt.Sprintf("%s.%d.csv", baseFileName, workerID)
+			// 重试机制
+			for attempt := 1; attempt <= maxRetries; attempt++ {
+				err := writeDataToGCS(store, fileName, data[start:end])
+				if err == nil {
+					log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, end-start)
+					return
+				}
+
+				log.Printf("Worker %d: 第 %d 次写入 GCS 失败: %v", workerID, attempt, err)
+
+				// 指数退避策略：等待 `2^(attempt-1) * 100ms`（最大不超过 5s）
+				waitTime := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
+				if waitTime > 4*time.Second {
+					waitTime = 4 * time.Second
+				}
+				time.Sleep(waitTime + time.Duration(rand.Intn(500))*time.Millisecond) // 额外加一点随机时间，避免同时重试
+			}
+			log.Printf("Worker %d: 最终写入失败 %s (%d 行)", workerID, fileName, end-start)
+		}(i)
+	}
+	wg.Wait()
+	log.Printf("GCS 并发写入完成，耗时: %v", time.Now().Sub(startTime))
+
+	showFiles(credentialPath)
+	if *deleteAfterWrite {
+		for i := 0; i < concurrency; i++ {
+			err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.csv", baseFileName, i))
+			if err != nil {
+				log.Printf("删除文件失败 %s (%d 行)", fmt.Sprintf("%s.%d.csv", baseFileName, i), chunkSize)
+			}
+		}
+	}
 }
 
 // 带重试的 GCS 写入封装
@@ -493,12 +545,17 @@ func main() {
 		return
 	}
 
+	// 打印写入的速度
 	wgS := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
 	wgS.Add(1)
 	go showWriteSpeed(ctx, wgS)
 
-	writeToGCSConcurrently(data, "testCSVWriter", *concurrency, *credentialPath, *deleteAfterWrite)
+	if *testLongTimeWrite {
+		pressureWriteToGCSConcurrently(data, *fileNamePrefix, *concurrency, *credentialPath)
+	} else {
+		writeToGCSConcurrently(data, *fileNamePrefix, *concurrency, *credentialPath)
+	}
 
 	cancel()
 	wgS.Wait()
@@ -583,7 +640,7 @@ func mainNew() {
 		if end > *rowCount {
 			end = *rowCount
 		}
-		csvFileName := fmt.Sprintf("%s.%d.csv", *baseFileName, taskID)
+		csvFileName := fmt.Sprintf("%s.%d.csv", *fileNamePrefix, taskID)
 		fileNames = append(fileNames, csvFileName)
 		task := Task{
 			id:       taskID,
