@@ -268,9 +268,9 @@ func generateDataConcurrentlyByCol(columns []Column, rowCount int, concurrency i
 
 			workerData := make([][]string, 0, end-start)
 			for _, col := range columns {
-				t := time.Now()
+				//t := time.Now()
 				workerData = append(workerData, generateValueByCol(col, end-start))
-				log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
+				//log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
 			}
 
 			dataChannel <- workerData
