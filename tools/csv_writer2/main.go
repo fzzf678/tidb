@@ -35,7 +35,7 @@ var (
 
 	batchSize    = flag.Int("batchSize", 500, "Number of rows to generate in each batch")
 	generatorNum = flag.Int("generatorNum", 1, "Number of generator goroutines")
-	writerNum    = flag.Int("writerNum", 16, "Number of writer goroutines")
+	writerNum    = flag.Int("writerNum", 8, "Number of writer goroutines")
 )
 
 const (
