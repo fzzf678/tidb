@@ -416,8 +416,6 @@ func writerWorkerByCol(resultsCh <-chan Result, store storage.ExternalStorage, w
 	var err error
 
 	for result := range resultsCh {
-		success := false
-		fileName := result.fileName
 		// 重试机制
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			startTime := time.Now()
