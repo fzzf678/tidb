@@ -138,10 +138,10 @@ func generateValueByCol(col Column, num int, res []string) {
 
 	case strings.HasPrefix(col.Type, "MEDIUMBLOB"):
 		generateMediumblob(num, res)
+
 	default:
 		log.Printf("Unsupported type: %s", col.Type)
 	}
-	//return nil
 }
 
 func generateLetterWithNum(len int) string {
@@ -170,56 +170,20 @@ func generateLetterWithNum(len int) string {
 }
 
 func generateBigint(num int, res []string) {
-	//res := make([]string, num)
 	for i := 0; i < num; i++ {
 		res[i] = strconv.Itoa(faker.Number(1, 1000000000))
 	}
-	//return res
 }
 
 func generateTinyint1(num int, res []string) {
-	//res := make([]string, num)
 	for i := 0; i < num; i++ {
 		res[i] = strconv.Itoa(faker.Number(0, 1))
 	}
-	//return res
 }
 
-//func generateVarbinary(num, len int, res []string) {
-//	//res := make([]string, num)
-//	for i := 0; i < num; i++ {
-//		res[i] = generateLetterWithNum(len)
-//	}
-//	//return res
-//}
-
 func generateVarbinary(num, len int, res []string) {
-	// Create a slice to hold the results
-	// Create a channel to receive the results from goroutines
-	resultChan := make(chan string, num)
-
-	// Use WaitGroup to ensure all goroutines finish before returning
-	var wg sync.WaitGroup
 	for i := 0; i < num; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			// Generate random string for each goroutine
-			resultChan <- generateLetterWithNum(len)
-		}(i)
-	}
-
-	// Wait for all goroutines to finish and collect the results
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	// Fill the result slice with data from the channel
-	i := 0
-	for resStr := range resultChan {
-		res[i] = resStr
-		i++
+		res[i] = generateLetterWithNum(len)
 	}
 }
 
