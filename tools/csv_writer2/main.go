@@ -193,9 +193,8 @@ func generateTinyint1(num int, res []string) {
 //	//return res
 //}
 
-func generateVarbinary(num, len int) []string {
+func generateVarbinary(num, len int, res []string) {
 	// Create a slice to hold the results
-	res := make([]string, num)
 	// Create a channel to receive the results from goroutines
 	resultChan := make(chan string, num)
 
@@ -222,7 +221,6 @@ func generateVarbinary(num, len int) []string {
 		res[i] = resStr
 		i++
 	}
-	return res
 }
 
 func generateMediumblob(num int, res []string) {
