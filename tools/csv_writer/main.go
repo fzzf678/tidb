@@ -815,8 +815,10 @@ func main() {
 		writeToGCSConcurrentlyByCol(data, *fileNamePrefix, *concurrency, *credentialPath)
 	}
 
+	log.Printf("Done！")
 	cancel()
 	wgS.Wait()
+	log.Printf("return！")
 }
 
 func mainNew() {
