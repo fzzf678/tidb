@@ -34,7 +34,7 @@ var (
 	gcsDir           = flag.String("gcsDir", "gcs://global-sort-dir", "GCS directory")
 
 	batchSize    = flag.Int("batchSize", 500, "Number of rows to generate in each batch")
-	generatorNum = flag.Int("generatorNum", 16, "Number of generator goroutines")
+	generatorNum = flag.Int("generatorNum", 1, "Number of generator goroutines")
 	writerNum    = flag.Int("writerNum", 16, "Number of writer goroutines")
 )
 
