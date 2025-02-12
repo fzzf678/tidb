@@ -43,13 +43,10 @@ const (
 )
 
 var faker *gofakeit.Faker
-var faker1 *gofakeit.Faker
 
 // 初始化 Faker 实例
 func init() {
-	rand.Seed(time.Now().UnixNano())
 	faker = gofakeit.New(time.Now().Unix())
-	faker1 = gofakeit.New(time.Now().Unix())
 }
 
 type Column struct {
@@ -152,10 +149,10 @@ func generateLetterWithNum(len int) string {
 
 	// 如果长度小于等于1000，直接生成
 	if len <= 1000 {
-		builder.WriteString(faker1.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", len)))
+		builder.WriteString(faker.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", len)))
 	} else {
 		// 生成1000字符的部分
-		builder.WriteString(faker1.Regex("[a-zA-Z0-9]{1000}"))
+		builder.WriteString(faker.Regex("[a-zA-Z0-9]{1000}"))
 
 		// 重复生成
 		for i := 1; i < len/1000; i++ {
@@ -188,45 +185,45 @@ func generateTinyint1(num int, res []string) {
 	//return res
 }
 
-func generateVarbinary(num, len int, res []string) {
-	//res := make([]string, num)
-	for i := 0; i < num; i++ {
-		res[i] = generateLetterWithNum(len)
-	}
-	//return res
-}
-
-//func generateVarbinary(num, len int) []string {
-//	// Create a slice to hold the results
-//	res := make([]string, num)
-//	// Create a channel to receive the results from goroutines
-//	resultChan := make(chan string, num)
-//
-//	// Use WaitGroup to ensure all goroutines finish before returning
-//	var wg sync.WaitGroup
+//func generateVarbinary(num, len int, res []string) {
+//	//res := make([]string, num)
 //	for i := 0; i < num; i++ {
-//		wg.Add(1)
-//		go func(i int) {
-//			defer wg.Done()
-//			// Generate random string for each goroutine
-//			resultChan <- generateLetterWithNum(len)
-//		}(i)
+//		res[i] = generateLetterWithNum(len)
 //	}
-//
-//	// Wait for all goroutines to finish and collect the results
-//	go func() {
-//		wg.Wait()
-//		close(resultChan)
-//	}()
-//
-//	// Fill the result slice with data from the channel
-//	i := 0
-//	for resStr := range resultChan {
-//		res[i] = resStr
-//		i++
-//	}
-//	return res
+//	//return res
 //}
+
+func generateVarbinary(num, len int) []string {
+	// Create a slice to hold the results
+	res := make([]string, num)
+	// Create a channel to receive the results from goroutines
+	resultChan := make(chan string, num)
+
+	// Use WaitGroup to ensure all goroutines finish before returning
+	var wg sync.WaitGroup
+	for i := 0; i < num; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// Generate random string for each goroutine
+			resultChan <- generateLetterWithNum(len)
+		}(i)
+	}
+
+	// Wait for all goroutines to finish and collect the results
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Fill the result slice with data from the channel
+	i := 0
+	for resStr := range resultChan {
+		res[i] = resStr
+		i++
+	}
+	return res
+}
 
 func generateMediumblob(num int, res []string) {
 	generateVarbinary(num, 73312, res)
