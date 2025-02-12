@@ -128,22 +128,22 @@ func generateValue(col Column) string {
 		}
 		return strconv.Itoa(gofakeit.Number(-128, 127))
 
-	case strings.HasPrefix(col.Type, "DECIMAL"), strings.HasPrefix(col.Type, "FLOAT"), strings.HasPrefix(col.Type, "DOUBLE"):
-		return fmt.Sprintf("%.2f", gofakeit.Float64Range(1.0, 10000.0))
+	//case strings.HasPrefix(col.Type, "DECIMAL"), strings.HasPrefix(col.Type, "FLOAT"), strings.HasPrefix(col.Type, "DOUBLE"):
+	//	return fmt.Sprintf("%.2f", gofakeit.Float64Range(1.0, 10000.0))
 
-	case strings.HasPrefix(col.Type, "VARCHAR"):
-		n := extractNumberFromSQLType(col.Type)
-		return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", n))
+	//case strings.HasPrefix(col.Type, "VARCHAR"):
+	//	n := extractNumberFromSQLType(col.Type)
+	//	return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", n))
+	//
+	//case strings.HasPrefix(col.Type, "TEXT"):
+	//	n := 64
+	//	return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", n))
+	//
+	//case strings.HasPrefix(col.Type, "BOOLEAN"):
+	//	return strconv.Itoa(gofakeit.Number(0, 1))
 
-	case strings.HasPrefix(col.Type, "TEXT"):
-		n := 64
-		return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", n))
-
-	case strings.HasPrefix(col.Type, "BOOLEAN"):
-		return strconv.Itoa(gofakeit.Number(0, 1))
-
-	case strings.HasPrefix(col.Type, "DATE"):
-		return gofakeit.Date().Format("2006-01-02")
+	//case strings.HasPrefix(col.Type, "DATE"):
+	//	return gofakeit.Date().Format("2006-01-02")
 
 	case strings.HasPrefix(col.Type, "DATETIME"), strings.HasPrefix(col.Type, "TIMESTAMP"):
 		start := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -151,8 +151,8 @@ func generateValue(col Column) string {
 		randomTime := gofakeit.DateRange(start, end)
 		return randomTime.Format("2006-01-02 15:04:05")
 
-	case strings.HasPrefix(col.Type, "ENUM") && len(col.Enum) > 0:
-		return col.Enum[gofakeit.Number(0, len(col.Enum)-1)]
+	//case strings.HasPrefix(col.Type, "ENUM") && len(col.Enum) > 0:
+	//	return col.Enum[gofakeit.Number(0, len(col.Enum)-1)]
 
 	case strings.HasPrefix(col.Type, "VARBINARY"):
 		n := extractNumberFromSQLType(col.Type)
