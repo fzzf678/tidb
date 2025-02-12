@@ -149,6 +149,13 @@ func generateValue(col Column) string {
 
 	case strings.HasPrefix(col.Type, "ENUM") && len(col.Enum) > 0:
 		return col.Enum[gofakeit.Number(0, len(col.Enum)-1)]
+
+	case strings.HasPrefix(col.Type, "VARBINARY"):
+		n := extractNumberFromSQLType(col.Type)
+		return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", n))
+
+	case strings.HasPrefix(col.Type, "MEDIUMBLOB"):
+		return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", 73312))
 	}
 
 	// 默认返回字符串
