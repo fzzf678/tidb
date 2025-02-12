@@ -775,7 +775,7 @@ func deleteAllFilesByPrefix(prefix string) {
 }
 
 // 主函数
-func main() {
+func mainOld() {
 	// 解析命令行参数
 	flag.Parse()
 
@@ -844,7 +844,7 @@ func main() {
 	//wgS.Wait()
 }
 
-func mainNew() {
+func main() {
 	// 解析命令行参数
 	flag.Parse()
 
