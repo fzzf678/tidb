@@ -217,45 +217,45 @@ func generateTinyint1(num int) []string {
 	return res
 }
 
-//func generateVarbinary(num, len int) []string {
-//	res := make([]string, num)
-//	for i := 0; i < num; i++ {
-//		res[i] = generateLetterWithNum(len)
-//	}
-//	return res
-//}
-
 func generateVarbinary(num, len int) []string {
-	// Create a slice to hold the results
 	res := make([]string, num)
-	// Create a channel to receive the results from goroutines
-	resultChan := make(chan string, num)
-
-	// Use WaitGroup to ensure all goroutines finish before returning
-	var wg sync.WaitGroup
 	for i := 0; i < num; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			// Generate random string for each goroutine
-			resultChan <- generateLetterWithNum(len)
-		}(i)
-	}
-
-	// Wait for all goroutines to finish and collect the results
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	// Fill the result slice with data from the channel
-	i := 0
-	for resStr := range resultChan {
-		res[i] = resStr
-		i++
+		res[i] = generateLetterWithNum(len)
 	}
 	return res
 }
+
+//func generateVarbinary(num, len int) []string {
+//	// Create a slice to hold the results
+//	res := make([]string, num)
+//	// Create a channel to receive the results from goroutines
+//	resultChan := make(chan string, num)
+//
+//	// Use WaitGroup to ensure all goroutines finish before returning
+//	var wg sync.WaitGroup
+//	for i := 0; i < num; i++ {
+//		wg.Add(1)
+//		go func(i int) {
+//			defer wg.Done()
+//			// Generate random string for each goroutine
+//			resultChan <- generateLetterWithNum(len)
+//		}(i)
+//	}
+//
+//	// Wait for all goroutines to finish and collect the results
+//	go func() {
+//		wg.Wait()
+//		close(resultChan)
+//	}()
+//
+//	// Fill the result slice with data from the channel
+//	i := 0
+//	for resStr := range resultChan {
+//		res[i] = resStr
+//		i++
+//	}
+//	return res
+//}
 
 func generateMediumblob(num int) []string {
 	return generateVarbinary(num, 73312)
