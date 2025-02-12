@@ -900,14 +900,14 @@ func main() {
 	// 启动 generator worker
 	for i := 0; i < *generatorNum; i++ {
 		wgGen.Add(1)
-		go generatorWorker(tasksCh, resultsCh, i, pool, &wgGen)
+		go generatorWorkerByCol(tasksCh, resultsCh, i, pool, &wgGen)
 	}
 
 	var wgWriter sync.WaitGroup
 	// 启动 writer worker
 	for i := 0; i < *writerNum; i++ {
 		wgWriter.Add(1)
-		go writerWorker(resultsCh, i, pool, &wgWriter)
+		go writerWorkerByCol(resultsCh, i, pool, &wgWriter)
 	}
 
 	// 将任务按照 [begin, end) 的范围进行分解，并发送到 tasksCh
@@ -1073,7 +1073,7 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 }
 
 // writerWorker 从 resultsCh 中获取生成结果，并写入 CSV 文件后将使用完的切片放回 pool
-func writerWorkerByCOl(resultsCh <-chan Result, workerID int, pool *sync.Pool, wg *sync.WaitGroup) {
+func writerWorkerByCol(resultsCh <-chan Result, workerID int, pool *sync.Pool, wg *sync.WaitGroup) {
 	defer wg.Done()
 	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: *credentialPath}}
 
