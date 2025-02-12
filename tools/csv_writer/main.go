@@ -1062,7 +1062,7 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 		// 设定切片长度为 count
 		values := buf[:colNum]
 
-		log.Printf("Generator %d: 处理任务 %d, 范围 [%d, %d)，生成 %d 个随机字符串", workerID, task.id, task.begin, task.end, count)
+		log.Printf("Generator %d: 处理任务 %d, 主键范围 [%d, %d)，生成 %d 个随机字符串", workerID, task.id, task.begin, task.end, count)
 
 		for i, col := range task.cols {
 			values[i] = generateValueByCol(col, count)
@@ -1100,7 +1100,7 @@ func writerWorkerByCOl(resultsCh <-chan Result, workerID int, pool *sync.Pool, w
 				err = writeDataToGCSByCol(store, fileName, result.values)
 			}
 			if err == nil {
-				log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, len(result.values))
+				log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, len(result.values[0]))
 				success = true
 				break
 			}
