@@ -507,7 +507,13 @@ func main() {
 	// 建立一个 sync.Pool 用于复用 []string 切片，初始容量为 batchSize
 	pool := &sync.Pool{
 		New: func() interface{} {
-			return make([][]string, *batchSize)
+			buf := make([][]string, len(columns))
+			for i := range buf {
+				if len(buf[i]) != *batchSize {
+					buf[i] = make([]string, *batchSize)
+				}
+			}
+			return buf
 		},
 	}
 
