@@ -32,11 +32,12 @@ var (
 	deletePrefixFile = flag.String("deletePrefixFile", "", "Delete all files with prefix")
 	gcsDir           = flag.String("gcsDir", "gcs://global-sort-dir", "GCS directory")
 
-	batchSize    = flag.Int("batchSize", 500, "Number of rows to generate in each batch")
-	generatorNum = flag.Int("generatorNum", 1, "Number of generator goroutines")
-	writerNum    = flag.Int("writerNum", 8, "Number of writer goroutines")
-	pkBegin      = flag.Int("pkBegin", 0, "Begin of primary key, [begin, end)")
-	pkEnd        = flag.Int("pkEnd", 1, "End of primary key[begin, end)")
+	batchSize           = flag.Int("batchSize", 500, "Number of rows to generate in each batch")
+	generatorNum        = flag.Int("generatorNum", 1, "Number of generator goroutines")
+	writerNum           = flag.Int("writerNum", 8, "Number of writer goroutines")
+	pkBegin             = flag.Int("pkBegin", 0, "Begin of primary key, [begin, end)")
+	pkEnd               = flag.Int("pkEnd", 1, "End of primary key[begin, end)")
+	fileNameSuffixStart = flag.Int("fileNameSuffixStart", 0, "Start of file name suffix")
 )
 
 const (
@@ -567,7 +568,7 @@ func main() {
 
 	// 将任务按照 [begin, end) 的范围进行分解，并发送到 tasksCh
 	startTime := time.Now()
-	taskID := 0
+	taskID := *fileNameSuffixStart
 	var fileNames []string
 
 	for pk := *pkBegin; pk < *pkEnd; pk += *batchSize {
