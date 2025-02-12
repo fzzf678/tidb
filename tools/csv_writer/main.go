@@ -155,7 +155,15 @@ func generateValue(col Column) string {
 		return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", n))
 
 	case strings.HasPrefix(col.Type, "MEDIUMBLOB"):
-		return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", 73312))
+		n := 73312
+		res := ""
+		for i := 0; i < n/1000; i++ {
+			res += gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", 1000))
+		}
+		if remain := n % 1000; remain > 0 {
+			res += gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", remain))
+		}
+		return res
 	}
 
 	// 默认返回字符串
