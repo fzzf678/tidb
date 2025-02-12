@@ -804,10 +804,10 @@ func main() {
 	}
 
 	// 打印写入的速度
-	wgS := sync.WaitGroup{}
-	ctx, cancel := context.WithCancel(context.Background())
-	wgS.Add(1)
-	go showWriteSpeed(ctx, wgS)
+	//wgS := sync.WaitGroup{}
+	//ctx, cancel := context.WithCancel(context.Background())
+	//wgS.Add(1)
+	//go showWriteSpeed(ctx, wgS)
 
 	if *testLongTimeWrite {
 		pressureWriteToGCSConcurrentlyByCol(data, *fileNamePrefix, *concurrency, *credentialPath)
@@ -815,10 +815,8 @@ func main() {
 		writeToGCSConcurrentlyByCol(data, *fileNamePrefix, *concurrency, *credentialPath)
 	}
 
-	log.Printf("Done！")
-	cancel()
-	wgS.Wait()
-	log.Printf("return！")
+	//cancel()
+	//wgS.Wait()
 }
 
 func mainNew() {
