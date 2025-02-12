@@ -1100,30 +1100,10 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 		}
 		// 设定切片长度为 count
 		values := buf[:colNum]
-		type colValues struct {
-			cols []string
-			id   int
-		}
-		resChan := make(chan colValues, colNum)
-		var wgCol sync.WaitGroup
 		for i, col := range task.cols {
-			//t := time.Now()
-			//values[i] = generateValueByCol(col, count)
-			//log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
-			wgCol.Add(1)
-			go func(colIdx int, col Column) {
-				t := time.Now()
-				c := colValues{generateValueByCol(col, count), colIdx}
-				log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
-				resChan <- c
-			}(i, col)
-		}
-		go func() {
-			wg.Wait()
-			close(resChan)
-		}()
-		for resStr := range resChan {
-			values[resStr.id] = resStr.cols
+			t := time.Now()
+			values[i] = generateValueByCol(col, count)
+			log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
 		}
 		log.Printf("Generator %d: 处理任务 %d, 主键范围 [%d, %d)，生成 %d 个随机字符串, 耗时: %v",
 			workerID, task.id, task.begin, task.end, count, time.Since(startTime))
