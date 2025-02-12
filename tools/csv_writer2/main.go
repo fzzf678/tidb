@@ -404,7 +404,7 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 			generateValueByCol(col, count, values[i])
 			//log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
 		}
-		log.Printf("Generator %d: 处理任务 %d, 主键范围 [%d, %d)，生成 %d 个随机字符串, 耗时: %v",
+		log.Printf("Generator %d: 处理任务 %d, 主键范围 [%d, %d)，生成 %d 行, 耗时: %v",
 			workerID, task.id, task.begin, task.end, count, time.Since(startTime))
 		resultsCh <- Result{id: task.id, values: values, fileName: task.fileName}
 	}
