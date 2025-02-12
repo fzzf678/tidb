@@ -156,22 +156,25 @@ func generateValue(col Column) string {
 
 	case strings.HasPrefix(col.Type, "VARBINARY"):
 		n := extractNumberFromSQLType(col.Type)
-		return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", n))
+		return generateLetterWithNum(n)
 
 	case strings.HasPrefix(col.Type, "MEDIUMBLOB"):
-		n := 73312
-		res := ""
-		for i := 0; i < n/1000; i++ {
-			res += gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", 1000))
-		}
-		if remain := n % 1000; remain > 0 {
-			res += gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", remain))
-		}
-		return res
+		return generateLetterWithNum(73312)
 	}
 
 	// 默认返回字符串
 	return gofakeit.Word()
+}
+
+func generateLetterWithNum(len int) string {
+	res := ""
+	for i := 0; i < len/1000; i++ {
+		res += gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", 1000))
+	}
+	if remain := len % 1000; remain > 0 {
+		res += gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", remain))
+	}
+	return res
 }
 
 // 生成符合字段类型的数据（并发）
