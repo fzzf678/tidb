@@ -167,12 +167,15 @@ func generateValue(col Column) string {
 }
 
 func generateLetterWithNum(len int) string {
-	res := ""
-	for i := 0; i < len/1000; i++ {
-		res += gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", 1000))
+	if len <= 1000 {
+		return gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", len))
+	}
+	res := gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", 1000))
+	for i := 1; i < len/1000; i++ {
+		res += res[:1000]
 	}
 	if remain := len % 1000; remain > 0 {
-		res += gofakeit.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", remain))
+		res += res[:remain]
 	}
 	return res
 }
