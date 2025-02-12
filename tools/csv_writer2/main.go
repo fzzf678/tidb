@@ -23,7 +23,6 @@ import (
 var (
 	credentialPath   = flag.String("credential", "/home/admin/credential", "Path to GCS credential file")
 	templatePath     = flag.String("template", "/home/admin/template.sql", "Path to SQL schema template")
-	rowCount         = flag.Int("rows", 8000, "Number of rows to generate")
 	showFile         = flag.Bool("showFile", false, "List all files in the GCS directory without generating data")
 	deleteFileName   = flag.String("deleteFile", "", "Delete a specific file from GCS")
 	deleteAfterWrite = flag.Bool("deleteAfterWrite", false, "Delete all file from GCS after write, TEST ONLY!")
