@@ -689,6 +689,27 @@ func writeCSVToLocalDiskByCol(filename string, columns []Column, data [][][]stri
 	return nil
 }
 
+func writeCSVToLocalDiskByCol2(filename string, columns []Column, data [][]string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// 写入数据
+	for i := 0; i < len(data[0]); i++ {
+		row := []string{}
+		for j := 0; j < len(data); j++ {
+			row = append(row, data[j][i])
+		}
+		writer.Write(row)
+	}
+	return nil
+}
+
 func showWriteSpeed(ctx context.Context, wg sync.WaitGroup) {
 	defer wg.Done()
 	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: *credentialPath}}
@@ -754,7 +775,7 @@ func deleteAllFilesByPrefix(prefix string) {
 }
 
 // 主函数
-func main() {
+func mainOld() {
 	// 解析命令行参数
 	flag.Parse()
 
@@ -822,7 +843,7 @@ func main() {
 	//wgS.Wait()
 }
 
-func mainNew() {
+func main() {
 	// 解析命令行参数
 	flag.Parse()
 
@@ -1002,6 +1023,81 @@ func writerWorker(resultsCh <-chan Result, workerID int, pool *sync.Pool, wg *sy
 				}
 			} else {
 				err = writeDataToGCS(store, fileName, result.values)
+			}
+			if err == nil {
+				log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, len(result.values))
+				success = true
+				break
+			}
+
+			log.Printf("Worker %d: 第 %d 次写入 GCS 失败: %v", workerID, attempt, err)
+
+			// 指数退避策略：等待 `2^(attempt-1) * 100ms`（最大不超过 5s）
+			waitTime := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
+			if waitTime > 4*time.Second {
+				waitTime = 4 * time.Second
+			}
+			time.Sleep(waitTime + time.Duration(rand.Intn(500))*time.Millisecond) // 额外加一点随机时间，避免同时重试
+		}
+		if !success {
+			log.Printf("Worker %d: 最终写入失败 %s (%d 行)", workerID, fileName, len(result.values))
+		}
+
+		// 将使用完的切片放回 pool 供后续复用
+		pool.Put(result.values)
+	}
+}
+
+// generatorWorker 从 tasksCh 中获取任务，使用 sync.Pool 复用 []string 切片，生成随机字符串后发送到 resultsCh
+func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID int, pool *sync.Pool, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for task := range tasksCh {
+		colNum := len(task.cols)
+		count := task.end - task.begin
+		// 尝试从池中获取一个 [][]string 切片
+		buf := pool.Get().([][]string)
+		if cap(buf) < colNum {
+			buf = make([][]string, colNum)
+		}
+		// 设定切片长度为 count
+		values := buf[:colNum]
+
+		log.Printf("Generator %d: 处理任务 %d, 范围 [%d, %d)，生成 %d 个随机字符串", workerID, task.id, task.begin, task.end, count)
+
+		for i, col := range task.cols {
+			values[i] = generateValueByCol(col, count)
+		}
+
+		resultsCh <- Result{id: task.id, values: values, fileName: task.fileName}
+	}
+}
+
+// writerWorker 从 resultsCh 中获取生成结果，并写入 CSV 文件后将使用完的切片放回 pool
+func writerWorkerByCOl(resultsCh <-chan Result, workerID int, pool *sync.Pool, wg *sync.WaitGroup) {
+	defer wg.Done()
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: *credentialPath}}
+
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
+
+	for result := range resultsCh {
+		success := false
+		fileName := result.fileName
+		// 重试机制
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if *localPath != "" {
+				err = writeCSVToLocalDiskByCol2(*localPath+fileName, nil, result.values)
+				if err != nil {
+					log.Fatal("Error writing CSV:", err)
+				}
+			} else {
+				err = writeDataToGCSByCol(store, fileName, result.values)
 			}
 			if err == nil {
 				log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, len(result.values))
