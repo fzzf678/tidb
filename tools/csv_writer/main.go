@@ -1101,7 +1101,9 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 		// 设定切片长度为 count
 		values := buf[:colNum]
 		for i, col := range task.cols {
+			t := time.Now()
 			values[i] = generateValueByCol(col, count)
+			log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
 		}
 		log.Printf("Generator %d: 处理任务 %d, 主键范围 [%d, %d)，生成 %d 个随机字符串, 耗时: %v",
 			workerID, task.id, task.begin, task.end, count, time.Since(startTime))
