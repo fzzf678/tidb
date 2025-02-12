@@ -775,7 +775,7 @@ func deleteAllFilesByPrefix(prefix string) {
 }
 
 // 主函数
-func mainOld() {
+func main() {
 	// 解析命令行参数
 	flag.Parse()
 
@@ -816,6 +816,7 @@ func mainOld() {
 	columns := parseSQLSchema(sqlSchema)
 
 	// 并发生成数据
+	startTime := time.Now()
 	data := generateDataConcurrentlyByCol(columns, *rowCount, *concurrency)
 
 	// 并发写入 GCS
@@ -838,12 +839,12 @@ func mainOld() {
 	} else {
 		writeToGCSConcurrentlyByCol(data, *fileNamePrefix, *concurrency, *credentialPath)
 	}
-
+	log.Printf("写入 GCS 完成，总耗时: %v", time.Since(startTime))
 	//cancel()
 	//wgS.Wait()
 }
 
-func main() {
+func mainNew() {
 	// 解析命令行参数
 	flag.Parse()
 
@@ -943,7 +944,7 @@ func main() {
 
 	// 等待所有 writer 完成写入
 	wgWriter.Wait()
-	log.Printf("写入 GCS 完成，耗时: %v", time.Since(startTime))
+	log.Printf("写入 GCS 完成，总耗时: %v", time.Since(startTime))
 	showFiles(*credentialPath)
 
 	if *deleteAfterWrite {
