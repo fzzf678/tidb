@@ -796,7 +796,6 @@ func main() {
 
 	// 并发写入 GCS
 	if *localPath != "" {
-		err = writeCSVToLocalDisk(*localPath, columns, data)
 		err = writeCSVToLocalDiskByCol(*localPath, columns, data)
 		if err != nil {
 			log.Fatal("Error writing CSV:", err)
@@ -811,9 +810,9 @@ func main() {
 	go showWriteSpeed(ctx, wgS)
 
 	if *testLongTimeWrite {
-		pressureWriteToGCSConcurrently(data, *fileNamePrefix, *concurrency, *credentialPath)
+		pressureWriteToGCSConcurrentlyByCol(data, *fileNamePrefix, *concurrency, *credentialPath)
 	} else {
-		writeToGCSConcurrently(data, *fileNamePrefix, *concurrency, *credentialPath)
+		writeToGCSConcurrentlyByCol(data, *fileNamePrefix, *concurrency, *credentialPath)
 	}
 
 	cancel()
