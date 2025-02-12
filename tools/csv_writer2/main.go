@@ -404,8 +404,8 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 			generateValueByCol(col, count, values[i])
 			//log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
 		}
-		log.Printf("Generator %d: 处理任务 %d, 主键范围 [%d, %d)，生成 %d 行, 耗时: %v",
-			workerID, task.id, task.begin, task.end, count, time.Since(startTime))
+		log.Printf("Generator %d: 处理 %s, 主键范围 [%d, %d)，生成 %d 行, 耗时: %v",
+			workerID, task.fileName, task.begin, task.end, count, time.Since(startTime))
 		resultsCh <- Result{id: task.id, values: values, fileName: task.fileName}
 	}
 }
@@ -422,8 +422,6 @@ func writerWorkerByCol(resultsCh <-chan Result, store storage.ExternalStorage, w
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			startTime := time.Now()
 			if *localPath != "" {
-				success = true
-				break
 				err = writeCSVToLocalDiskByCol2(*localPath+fileName, nil, result.values)
 				if err != nil {
 					log.Fatal("Error writing CSV:", err)
@@ -432,12 +430,12 @@ func writerWorkerByCol(resultsCh <-chan Result, store storage.ExternalStorage, w
 				err = writeDataToGCSByCol(store, fileName, result.values)
 			}
 			if err == nil {
-				log.Printf("Worker %d: 成功写入 %s (%d 行), 耗时: %v", workerID, fileName, len(result.values[0]), time.Since(startTime))
+				log.Printf("Writer %d: 写入 %s (%d 行), 耗时: %v", workerID, fileName, len(result.values[0]), time.Since(startTime))
 				success = true
 				break
 			}
 
-			log.Printf("Worker %d: 第 %d 次写入 GCS 失败: %v", workerID, attempt, err)
+			log.Printf("Writer %d: 第 %d 次写入 GCS 失败: %v", workerID, attempt, err)
 
 			// 指数退避策略：等待 `2^(attempt-1) * 100ms`（最大不超过 5s）
 			waitTime := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
@@ -447,7 +445,7 @@ func writerWorkerByCol(resultsCh <-chan Result, store storage.ExternalStorage, w
 			time.Sleep(waitTime + time.Duration(rand.Intn(500))*time.Millisecond) // 额外加一点随机时间，避免同时重试
 		}
 		if !success {
-			log.Printf("Worker %d: 最终写入失败 %s (%d 行)", workerID, fileName, len(result.values))
+			log.Printf("Writer %d: 最终写入失败 %s (%d 行)", workerID, fileName, len(result.values))
 		}
 
 		// 将使用完的切片放回 pool 供后续复用
