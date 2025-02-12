@@ -707,6 +707,7 @@ func showWriteSpeed(ctx context.Context, wg sync.WaitGroup) {
 		case <-t.C:
 			curFileNum := 0
 			curSize := 0.0 // MiB
+			store.WalkDir(ctx, &storage.WalkOption{SkipSubDir: true}, func(path string, size int64) error {
 				curFileNum++
 				curSize += float64(size) / 1024 / 1024
 				return nil
