@@ -906,9 +906,18 @@ func main() {
 
 	var wgWriter sync.WaitGroup
 	// 启动 writer worker
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: *credentialPath}}
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
 	for i := 0; i < *writerNum; i++ {
 		wgWriter.Add(1)
-		go writerWorkerByCol(resultsCh, i, pool, &wgWriter)
+		go writerWorkerByCol(resultsCh, store, i, pool, &wgWriter)
 	}
 
 	// 将任务按照 [begin, end) 的范围进行分解，并发送到 tasksCh
@@ -1076,18 +1085,9 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 }
 
 // writerWorker 从 resultsCh 中获取生成结果，并写入 CSV 文件后将使用完的切片放回 pool
-func writerWorkerByCol(resultsCh <-chan Result, workerID int, pool *sync.Pool, wg *sync.WaitGroup) {
+func writerWorkerByCol(resultsCh <-chan Result, store storage.ExternalStorage, workerID int, pool *sync.Pool, wg *sync.WaitGroup) {
 	defer wg.Done()
-	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: *credentialPath}}
-
-	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
-	if err != nil {
-		panic(err)
-	}
-	store, err := storage.NewWithDefaultOpt(context.Background(), s)
-	if err != nil {
-		panic(err)
-	}
+	var err error
 
 	for result := range resultsCh {
 		success := false
