@@ -36,6 +36,8 @@ var (
 	batchSize    = flag.Int("batchSize", 500, "Number of rows to generate in each batch")
 	generatorNum = flag.Int("generatorNum", 1, "Number of generator goroutines")
 	writerNum    = flag.Int("writerNum", 8, "Number of writer goroutines")
+	pkBegin      = flag.Int("pkBegin", 0, "Begin of primary key, [begin, end)")
+	pkEnd        = flag.Int("pkEnd", 1, "End of primary key[begin, end)")
 )
 
 const (
@@ -53,6 +55,7 @@ type Column struct {
 	Name string
 	Type string
 	Enum []string // 处理 ENUM 类型
+	IsPK bool
 }
 
 // 读取 SQL Schema 文件
@@ -69,6 +72,7 @@ func parseSQLSchema(schema string) []Column {
 	lines := strings.Split(schema, "\n")
 	columns := []Column{}
 
+	hasPk := false
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		// 过滤掉空行、CREATE TABLE 和 `);`
@@ -100,8 +104,13 @@ func parseSQLSchema(schema string) []Column {
 				enumValues = strings.Split(enumStr, ",")       // 按逗号拆分
 			}
 		}
+		col := Column{Name: colName, Type: colType, Enum: enumValues}
+		if strings.Contains(strings.ToUpper(line), "PRIMARY KEY") && !hasPk {
+			hasPk = true
+			col.IsPK = true
+		}
+		columns = append(columns, col)
 
-		columns = append(columns, Column{Name: colName, Type: colType, Enum: enumValues})
 	}
 	return columns
 }
@@ -197,6 +206,15 @@ func generateTimestamp(num int, res []string) {
 	for i := 0; i < num; i++ {
 		randomTime := faker.DateRange(start, end)
 		res[i] = randomTime.Format("2006-01-02 15:04:05")
+	}
+}
+
+// 左闭右开区间 [begin, end)
+func generatePrimaryKey(begin, end int, res []string) {
+	idx := 0
+	for key := begin; key < end; key++ {
+		res[idx] = strconv.Itoa(key)
+		idx++
 	}
 }
 
@@ -391,15 +409,19 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 			buf = make([][]string, colNum)
 		}
 		for i := range buf {
-			if len(buf[i]) != *batchSize {
-				buf[i] = make([]string, *batchSize)
+			if len(buf[i]) != count {
+				buf[i] = make([]string, count)
 			}
 		}
 		// 设定切片长度为 count
 		values := buf[:colNum]
 		for i, col := range task.cols {
 			//t := time.Now()
-			generateValueByCol(col, count, values[i])
+			if col.IsPK {
+				generatePrimaryKey(task.begin, task.end, values[i])
+			} else {
+				generateValueByCol(col, count, values[i])
+			}
 			//log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
 		}
 		log.Printf("Generator %d: 处理 %s, 主键范围 [%d, %d)，生成 %d 行, 耗时: %v",
@@ -479,8 +501,9 @@ func main() {
 		return
 	}
 
+	rowCount := *pkEnd - *pkBegin
 	log.Printf("配置参数: credential=%s, template=%s, generatorNum=%d, writerNum=%d, rowCount=%d, batchSize=%d",
-		*credentialPath, *templatePath, *generatorNum, *writerNum, *rowCount, *batchSize)
+		*credentialPath, *templatePath, *generatorNum, *writerNum, rowCount, *batchSize)
 
 	// 读取 SQL Schema
 	sqlSchema, err := readSQLFile(*templatePath)
@@ -491,11 +514,16 @@ func main() {
 	// 解析 Schema
 	columns := parseSQLSchema(sqlSchema)
 
+	// 检查 pk 范围
+	if rowCount%*batchSize != 0 {
+		log.Fatal("pkEnd - pkBegin 必须是 batchSize 的整数倍")
+	}
+
 	// 计算任务数量
-	if *rowCount <= 0 || *batchSize <= 0 {
+	if rowCount <= 0 || *batchSize <= 0 {
 		log.Fatal("总数和每个批次的数量必须大于 0")
 	}
-	taskCount := (*rowCount + *batchSize - 1) / *batchSize
+	taskCount := (rowCount + *batchSize - 1) / *batchSize
 	log.Printf("总共将生成 %d 个任务，每个任务最多生成 %d 行", taskCount, *batchSize)
 
 	// 创建任务和结果的 channel
@@ -541,15 +569,11 @@ func main() {
 	// 将任务按照 [begin, end) 的范围进行分解，并发送到 tasksCh
 	startTime := time.Now()
 	taskID := 0
-	currentIndex := 0
 	var fileNames []string
 
-	for currentIndex < *rowCount {
-		begin := currentIndex
-		end := currentIndex + *batchSize
-		if end > *rowCount {
-			end = *rowCount
-		}
+	for pk := *pkBegin; pk < *pkEnd; pk += *batchSize {
+		begin := pk
+		end := pk + *batchSize
 		csvFileName := fmt.Sprintf("%s.%d.csv", *fileNamePrefix, taskID)
 		fileNames = append(fileNames, csvFileName)
 		task := Task{
@@ -561,7 +585,6 @@ func main() {
 		}
 		tasksCh <- task
 		taskID++
-		currentIndex = end
 	}
 	close(tasksCh) // 任务分发完毕后关闭 tasksCh
 
