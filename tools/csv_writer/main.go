@@ -177,6 +177,119 @@ func generateLetterWithNum(len int) string {
 	return res
 }
 
+func generateValueByCol(col Column, num int) []string {
+	switch {
+	case strings.HasPrefix(col.Type, "BIGINT"):
+		return generateBigint(num)
+
+	case strings.HasPrefix(col.Type, "TINYINT"):
+		return generateTinyint1(num)
+
+	case strings.HasPrefix(col.Type, "TIMESTAMP"):
+		return generateTimestamp(num)
+
+	case strings.HasPrefix(col.Type, "VARBINARY"):
+		return generateVarbinary(num, extractNumberFromSQLType(col.Type))
+
+	case strings.HasPrefix(col.Type, "MEDIUMBLOB"):
+		return generateMediumblob(num)
+	}
+	log.Printf("Unsupported type: %s", col.Type)
+	return nil
+}
+
+func generateBigint(num int) []string {
+	res := make([]string, num)
+	for i := 0; i < num; i++ {
+		res[i] = strconv.Itoa(gofakeit.Number(1, 1000000000))
+	}
+	return res
+}
+
+func generateTinyint1(num int) []string {
+	res := make([]string, num)
+	for i := 0; i < num; i++ {
+		res[i] = strconv.Itoa(gofakeit.Number(0, 1))
+	}
+	return res
+}
+
+func generateVarbinary(num, len int) []string {
+	res := make([]string, num)
+	for i := 0; i < num; i++ {
+		res[i] = generateLetterWithNum(len)
+	}
+	return res
+}
+
+func generateMediumblob(num int) []string {
+	res := make([]string, num)
+	for i := 0; i < num; i++ {
+		res[i] = generateLetterWithNum(73312)
+	}
+	return res
+}
+
+func generateTimestamp(num int) []string {
+	res := make([]string, num)
+	start := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Now() // 取当前时间
+	for i := 0; i < num; i++ {
+		randomTime := gofakeit.DateRange(start, end)
+		res[i] = randomTime.Format("2006-01-02 15:04:05")
+	}
+	return res
+}
+
+// 生成符合字段类型的数据（并发）
+func generateDataConcurrentlyByCol(columns []Column, rowCount int, concurrency int) [][][]string {
+	var wg sync.WaitGroup
+	chunkSize := rowCount / concurrency
+	dataChannel := make(chan [][]string, concurrency)
+
+	startTime := time.Now()
+
+	// 并发生成数据
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			start := workerID * chunkSize
+			end := start + chunkSize
+			if workerID == concurrency-1 {
+				end = rowCount
+			}
+
+			log.Printf("Worker %d: 生成数据 %d - %d", workerID, start, end)
+
+			workerData := make([][]string, 0, end-start)
+			for _, col := range columns {
+				t := time.Now()
+				workerData = append(workerData, generateValueByCol(col, end-start))
+				log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
+			}
+
+			dataChannel <- workerData
+			log.Printf("Worker %d: 生成完成 %d 行数据", workerID, len(workerData))
+		}(i)
+	}
+
+	wg.Wait()
+	close(dataChannel)
+
+	// 合并所有数据
+	data := make([][][]string, 0, rowCount)
+	for chunk := range dataChannel {
+		data = append(data, chunk)
+	}
+
+	endTime := time.Now()
+	log.Printf("生成随机数据完成，耗时: %v", endTime.Sub(startTime))
+
+	return data
+}
+
 // 生成符合字段类型的数据（并发）
 func generateDataConcurrently(columns []Column, rowCount int, concurrency int) [][]string {
 	var wg sync.WaitGroup
@@ -298,6 +411,9 @@ func pressureWriteToGCSConcurrently(data [][]string, baseFileName string, concur
 	log.Printf("GCS 并发写入完成，耗时: %v", time.Now().Sub(startTime))
 }
 
+func pressureWriteToGCSConcurrentlyByCol(data [][][]string, baseFileName string, concurrency int, credentialPath string) {
+}
+
 // 并发写入 GCS
 func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency int, credentialPath string) {
 	var wg sync.WaitGroup
@@ -361,6 +477,70 @@ func writeToGCSConcurrently(data [][]string, baseFileName string, concurrency in
 	}
 }
 
+// 并发写入 GCS
+func writeToGCSConcurrentlyByCol(data [][][]string, baseFileName string, concurrency int, credentialPath string) {
+	var wg sync.WaitGroup
+	chunkSize := len(data) / concurrency
+
+	op := storage.BackendOptions{GCS: storage.GCSBackendOptions{CredentialsFile: credentialPath}}
+
+	s, err := storage.ParseBackend("gcs://global-sort-dir", &op)
+	if err != nil {
+		panic(err)
+	}
+	store, err := storage.NewWithDefaultOpt(context.Background(), s)
+	if err != nil {
+		panic(err)
+	}
+
+	startTime := time.Now()
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+
+		go func(workerID int) {
+			defer wg.Done()
+			start := workerID * chunkSize
+			end := start + chunkSize
+			if workerID == concurrency-1 {
+				end = len(data)
+			}
+			fileName := fmt.Sprintf("%s.%d.csv", baseFileName, workerID)
+			csvData := data[workerID]
+			// 重试机制
+			for attempt := 1; attempt <= maxRetries; attempt++ {
+				err := writeDataToGCSByCol(store, fileName, csvData)
+				if err == nil {
+					log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, end-start)
+					return
+				}
+
+				log.Printf("Worker %d: 第 %d 次写入 GCS 失败: %v", workerID, attempt, err)
+
+				// 指数退避策略：等待 `2^(attempt-1) * 100ms`（最大不超过 5s）
+				waitTime := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
+				if waitTime > 4*time.Second {
+					waitTime = 4 * time.Second
+				}
+				time.Sleep(waitTime + time.Duration(rand.Intn(500))*time.Millisecond) // 额外加一点随机时间，避免同时重试
+			}
+			log.Printf("Worker %d: 最终写入失败 %s (%d 行)", workerID, fileName, end-start)
+		}(i)
+	}
+	wg.Wait()
+	log.Printf("GCS 并发写入完成，耗时: %v", time.Now().Sub(startTime))
+
+	showFiles(credentialPath)
+	if *deleteAfterWrite {
+		for i := 0; i < concurrency; i++ {
+			err = store.DeleteFile(context.Background(), fmt.Sprintf("%s.%d.csv", baseFileName, i))
+			if err != nil {
+				log.Printf("删除文件失败 %s (%d 行)", fmt.Sprintf("%s.%d.csv", baseFileName, i), chunkSize)
+			}
+		}
+	}
+}
+
 // 带重试的 GCS 写入封装
 func writeDataToGCS(store storage.ExternalStorage, fileName string, data [][]string) error {
 	writer, err := store.Create(context.Background(), fileName, nil)
@@ -370,6 +550,29 @@ func writeDataToGCS(store storage.ExternalStorage, fileName string, data [][]str
 	defer writer.Close(context.Background())
 
 	for _, row := range data {
+		_, err = writer.Write(context.Background(), []byte(strings.Join(row, ",")+"\n"))
+		if err != nil {
+			log.Printf("写入 GCS 失败，删除文件: %s", fileName)
+			store.DeleteFile(context.Background(), fileName) // 删除已创建的文件
+			return fmt.Errorf("写入 GCS 失败: %w", err)
+		}
+	}
+	return nil
+}
+
+// 带重试的 GCS 写入封装
+func writeDataToGCSByCol(store storage.ExternalStorage, fileName string, data [][]string) error {
+	writer, err := store.Create(context.Background(), fileName, nil)
+	if err != nil {
+		return fmt.Errorf("创建 GCS 文件失败: %w", err)
+	}
+	defer writer.Close(context.Background())
+
+	for i := 0; i < len(data[0]); i++ {
+		row := make([]string, 0, len(data[0]))
+		for j := 0; j < len(data); j++ {
+			row = append(row, data[j][i])
+		}
 		_, err = writer.Write(context.Background(), []byte(strings.Join(row, ",")+"\n"))
 		if err != nil {
 			log.Printf("写入 GCS 失败，删除文件: %s", fileName)
@@ -456,6 +659,30 @@ func writeCSVToLocalDisk(filename string, columns []Column, data [][]string) err
 		writer.Write(row)
 	}
 
+	return nil
+}
+
+// 写入 CSV 文件
+func writeCSVToLocalDiskByCol(filename string, columns []Column, data [][][]string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// 写入数据
+	for _, batch := range data {
+		for i := 0; i < len(batch[0]); i++ {
+			row := []string{}
+			for j := 0; j < len(batch); j++ {
+				row = append(row, batch[j][i])
+			}
+			writer.Write(row)
+		}
+	}
 	return nil
 }
 
@@ -565,11 +792,12 @@ func main() {
 	columns := parseSQLSchema(sqlSchema)
 
 	// 并发生成数据
-	data := generateDataConcurrently(columns, *rowCount, *concurrency)
+	data := generateDataConcurrentlyByCol(columns, *rowCount, *concurrency)
 
 	// 并发写入 GCS
 	if *localPath != "" {
 		err = writeCSVToLocalDisk(*localPath, columns, data)
+		err = writeCSVToLocalDiskByCol(*localPath, columns, data)
 		if err != nil {
 			log.Fatal("Error writing CSV:", err)
 		}
