@@ -1112,7 +1112,10 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 			//log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
 			wgCol.Add(1)
 			go func(colIdx int, col Column) {
-				resChan <- colValues{generateValueByCol(col, count), colIdx}
+				t := time.Now()
+				c := colValues{generateValueByCol(col, count), colIdx}
+				log.Printf("Worker %d: 生成 %s 数据耗时: %v", workerID, col.Type, time.Since(t))
+				resChan <- c
 			}(i, col)
 		}
 		go func() {
