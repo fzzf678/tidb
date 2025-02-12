@@ -122,6 +122,10 @@ func generateValue(col Column) string {
 		return strconv.Itoa(gofakeit.Number(1, 1000000))
 
 	case strings.HasPrefix(col.Type, "TINYINT"):
+		n := extractNumberFromSQLType(col.Type)
+		if n == 1 {
+			return strconv.Itoa(gofakeit.Number(0, 1))
+		}
 		return strconv.Itoa(gofakeit.Number(-128, 127))
 
 	case strings.HasPrefix(col.Type, "DECIMAL"), strings.HasPrefix(col.Type, "FLOAT"), strings.HasPrefix(col.Type, "DOUBLE"):
