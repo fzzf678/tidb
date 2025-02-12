@@ -1053,6 +1053,7 @@ func writerWorker(resultsCh <-chan Result, workerID int, pool *sync.Pool, wg *sy
 func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID int, pool *sync.Pool, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for task := range tasksCh {
+		startTime := time.Now()
 		colNum := len(task.cols)
 		count := task.end - task.begin
 		// 尝试从池中获取一个 [][]string 切片
@@ -1063,7 +1064,8 @@ func generatorWorkerByCol(tasksCh <-chan Task, resultsCh chan<- Result, workerID
 		// 设定切片长度为 count
 		values := buf[:colNum]
 
-		log.Printf("Generator %d: 处理任务 %d, 主键范围 [%d, %d)，生成 %d 个随机字符串", workerID, task.id, task.begin, task.end, count)
+		log.Printf("Generator %d: 处理任务 %d, 主键范围 [%d, %d)，生成 %d 个随机字符串, 耗时: %v",
+			workerID, task.id, task.begin, task.end, count, time.Since(startTime))
 
 		for i, col := range task.cols {
 			values[i] = generateValueByCol(col, count)
@@ -1092,6 +1094,7 @@ func writerWorkerByCol(resultsCh <-chan Result, workerID int, pool *sync.Pool, w
 		fileName := result.fileName
 		// 重试机制
 		for attempt := 1; attempt <= maxRetries; attempt++ {
+			startTime := time.Now()
 			if *localPath != "" {
 				err = writeCSVToLocalDiskByCol2(*localPath+fileName, nil, result.values)
 				if err != nil {
@@ -1101,7 +1104,7 @@ func writerWorkerByCol(resultsCh <-chan Result, workerID int, pool *sync.Pool, w
 				err = writeDataToGCSByCol(store, fileName, result.values)
 			}
 			if err == nil {
-				log.Printf("Worker %d: 成功写入 %s (%d 行)", workerID, fileName, len(result.values[0]))
+				log.Printf("Worker %d: 成功写入 %s (%d 行), 耗时: %v", workerID, fileName, len(result.values[0]), time.Since(startTime))
 				success = true
 				break
 			}
