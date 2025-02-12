@@ -192,14 +192,12 @@ func generateMediumblob(num int, res []string) {
 }
 
 func generateTimestamp(num int, res []string) {
-	//res := make([]string, num)
 	start := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Now() // 取当前时间
 	for i := 0; i < num; i++ {
 		randomTime := faker.DateRange(start, end)
 		res[i] = randomTime.Format("2006-01-02 15:04:05")
 	}
-	//return res
 }
 
 // 带重试的 GCS 写入封装
@@ -416,6 +414,8 @@ func writerWorkerByCol(resultsCh <-chan Result, store storage.ExternalStorage, w
 	var err error
 
 	for result := range resultsCh {
+		success := false
+		fileName := result.fileName
 		// 重试机制
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			startTime := time.Now()
