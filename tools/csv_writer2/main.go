@@ -168,6 +168,7 @@ func generateValueByCol(col Column, num int, res []string) {
 func generateLetterWithNum(len int) string {
 	var builder strings.Builder
 
+	len = faker.Number(1, len) // 随机长度 varbinary
 	// 如果长度小于等于1000，直接生成
 	if len <= 1000 {
 		builder.WriteString(faker.Regex(fmt.Sprintf("[a-zA-Z0-9]{%d}", len)))
