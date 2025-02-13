@@ -215,8 +215,10 @@ func generateTimestamp(num int, res []string) {
 // 左闭右开区间 [begin, end)
 func generatePrimaryKey(begin, end int, res []string) {
 	idx := 0
+	log.Printf("生成主键范围 [%d, %d)", begin, end)
 	for key := begin; key < end; key++ {
 		res[idx] = strconv.Itoa(key)
+		log.Printf("第 %d 个主键的值是 %d", idx, key)
 		idx++
 	}
 }
