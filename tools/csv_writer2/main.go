@@ -44,7 +44,9 @@ var (
 )
 
 const (
-	maxRetries = 3
+	maxRetries  = 3
+	uuidLen     = 36
+	maxIndexLen = 3072
 )
 
 var faker *gofakeit.Faker
@@ -55,10 +57,11 @@ func init() {
 }
 
 type Column struct {
-	Name string
-	Type string
-	Enum []string // 处理 ENUM 类型
-	IsPK bool
+	Name     string
+	Type     string
+	Enum     []string // 处理 ENUM 类型
+	IsPK     bool
+	IsUnique bool
 }
 
 // 读取 SQL Schema 文件
@@ -112,6 +115,12 @@ func parseSQLSchema(schema string) []Column {
 			hasPk = true
 			col.IsPK = true
 		}
+		if strings.Contains(strings.ToUpper(line), "UNIQUE KEY") &&
+			strings.HasPrefix(col.Type, "VARBINARY") &&
+			extractNumberFromSQLType(colType) > uuidLen &&
+			extractNumberFromSQLType(colType) < maxIndexLen {
+			col.IsUnique = true
+		}
 		columns = append(columns, col)
 
 	}
@@ -146,7 +155,7 @@ func generateValueByCol(col Column, num int, res []string) {
 		generateTimestamp(num, res)
 
 	case strings.HasPrefix(col.Type, "VARBINARY"):
-		generateVarbinary(num, extractNumberFromSQLType(col.Type), res)
+		generateVarbinary(num, extractNumberFromSQLType(col.Type), res, col.IsUnique)
 
 	case strings.HasPrefix(col.Type, "MEDIUMBLOB"):
 		generateMediumblob(num, res)
@@ -193,14 +202,19 @@ func generateTinyint1(num int, res []string) {
 	}
 }
 
-func generateVarbinary(num, len int, res []string) {
+func generateVarbinary(num, len int, res []string, unique bool) {
 	for i := 0; i < num; i++ {
-		res[i] = generateLetterWithNum(len)
+		if unique {
+			uuid := faker.UUID()
+			res[i] = uuid + generateLetterWithNum(len-uuidLen)
+		} else {
+			res[i] = generateLetterWithNum(len)
+		}
 	}
 }
 
 func generateMediumblob(num int, res []string) {
-	generateVarbinary(num, 73312, res)
+	generateVarbinary(num, 73312, res, false)
 }
 
 func generateTimestamp(num int, res []string) {
