@@ -215,7 +215,6 @@ func generateTimestamp(num int, res []string) {
 // 左闭右开区间 [begin, end)
 func generatePrimaryKey(begin, end int, res []string) {
 	idx := 0
-	log.Printf("生成主键范围 [%d, %d)", begin, end)
 	for key := begin; key < end; key++ {
 		res[idx] = strconv.Itoa(key)
 		log.Printf("第 %d 个主键的值是 %d", idx, key)
@@ -232,7 +231,6 @@ func writeDataToGCSByCol(store storage.ExternalStorage, fileName string, data []
 	defer writer.Close(context.Background())
 
 	for i := 0; i < len(data[0]); i++ {
-		log.Printf("主键：%s", data[0][i])
 		row := make([]string, 0, len(data[0]))
 		for j := 0; j < len(data); j++ {
 			row = append(row, data[j][i])
