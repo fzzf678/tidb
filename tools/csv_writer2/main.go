@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/csv"
@@ -39,6 +40,7 @@ var (
 	pkBegin             = flag.Int("pkBegin", 0, "Begin of primary key, [begin, end)")
 	pkEnd               = flag.Int("pkEnd", 1, "End of primary key[begin, end)")
 	fileNameSuffixStart = flag.Int("fileNameSuffixStart", 0, "Start of file name suffix")
+	base64Encode        = flag.Bool("base64Encode", true, "Base64 encode the CSV file")
 )
 
 const (
@@ -233,8 +235,12 @@ func writeDataToGCSByCol(store storage.ExternalStorage, fileName string, data []
 			row = append(row, data[j][i])
 		}
 		// base64 编码
-		base64Str := base64.StdEncoding.EncodeToString([]byte(strings.Join(row, ",") + "\n"))
-		_, err = writer.Write(context.Background(), []byte(base64Str))
+		if *base64Encode {
+			base64Str := base64.StdEncoding.EncodeToString([]byte(strings.Join(row, ",") + "\n"))
+			_, err = writer.Write(context.Background(), []byte(base64Str))
+		} else {
+			_, err = writer.Write(context.Background(), []byte(strings.Join(row, ",")+"\n"))
+		}
 		if err != nil {
 			log.Printf("写入 GCS 失败，删除文件: %s", fileName)
 			store.DeleteFile(context.Background(), fileName) // 删除已创建的文件
@@ -297,8 +303,53 @@ func glanceFiles(credentialPath, fileName string) {
 	fmt.Println(string(b))
 }
 
+func writeCSVToLocalDiskBase64(data [][]string, fileName string) error {
+	// 创建一个 bytes.Buffer 用于存放 CSV 数据
+	var buf bytes.Buffer
+
+	// 创建 CSV writer，将数据写入内存缓冲区
+	writer := csv.NewWriter(&buf)
+	for i := 0; i < len(data[0]); i++ {
+		var row []string
+		for j := 0; j < len(data); j++ {
+			row = append(row, data[j][i])
+		}
+		writer.Write(row)
+	}
+
+	// 刷新 CSV writer，确保所有数据写入缓冲区
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		log.Fatal("刷新 CSV writer 失败:", err)
+		return err
+	}
+
+	// 将 CSV 数据进行 Base64 编码
+	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	// 将 Base64 编码后的字符串写入文件
+	outFile, err := os.Create(fileName)
+	if err != nil {
+		log.Fatal("创建文件失败:", err)
+		return err
+	}
+	defer outFile.Close()
+
+	_, err = outFile.WriteString(encoded)
+	if err != nil {
+		log.Fatal("写入文件失败:", err)
+		return err
+	}
+
+	log.Println(fmt.Sprintf("CSV 文件已 Base64 编码并写入 %s", fileName))
+	return nil
+}
+
 // 写入 CSV 文件
 func writeCSVToLocalDiskByCol2(filename string, columns []Column, data [][]string) error {
+	if *base64Encode {
+		return writeCSVToLocalDiskBase64(data, filename)
+	}
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
