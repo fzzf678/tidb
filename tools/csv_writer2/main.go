@@ -232,7 +232,7 @@ func generatePrimaryKey(begin, end int, res []string) {
 	idx := 0
 	for key := begin; key < end; key++ {
 		res[idx] = strconv.Itoa(key)
-		log.Printf("第 %d 个主键的值是 %d", idx, key)
+		//log.Printf("第 %d 个主键的值是 %d", idx, key)
 		idx++
 	}
 }
