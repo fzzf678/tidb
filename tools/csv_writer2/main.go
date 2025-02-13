@@ -230,6 +230,7 @@ func writeDataToGCSByCol(store storage.ExternalStorage, fileName string, data []
 	defer writer.Close(context.Background())
 
 	for i := 0; i < len(data[0]); i++ {
+		log.Printf("主键：%s", data[0][i])
 		row := make([]string, 0, len(data[0]))
 		for j := 0; j < len(data); j++ {
 			row = append(row, data[j][i])
