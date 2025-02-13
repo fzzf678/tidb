@@ -248,15 +248,16 @@ func writeDataToGCSByCol(store storage.ExternalStorage, fileName string, data []
 	for i := 0; i < len(data[0]); i++ {
 		row := make([]string, 0, len(data[0]))
 		for j := 0; j < len(data); j++ {
-			row = append(row, data[j][i])
+			//row = append(row, data[j][i])
+			row = append(row, base64.StdEncoding.EncodeToString([]byte(data[j][i])))
 		}
 		// base64 编码
-		if *base64Encode {
-			base64Str := base64.StdEncoding.EncodeToString([]byte(strings.Join(row, ",") + "\n"))
-			_, err = writer.Write(context.Background(), []byte(base64Str))
-		} else {
-			_, err = writer.Write(context.Background(), []byte(strings.Join(row, ",")+"\n"))
-		}
+		//if *base64Encode {
+		//	base64Str := base64.StdEncoding.EncodeToString([]byte(strings.Join(row, ",") + "\n"))
+		//	_, err = writer.Write(context.Background(), []byte(base64Str))
+		//} else {
+		_, err = writer.Write(context.Background(), []byte(strings.Join(row, ",")+"\n"))
+		//}
 		if err != nil {
 			log.Printf("写入 GCS 失败，删除文件: %s", fileName)
 			store.DeleteFile(context.Background(), fileName) // 删除已创建的文件
