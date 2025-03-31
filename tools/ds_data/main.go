@@ -304,6 +304,7 @@ func main() {
 	if (sessionSnEnd-sessionSnStart)%sessionNumPerFile != 0 {
 		panic("sessionSnEnd - sessionSnStart must be a multiple of sessionNumPerFile")
 	}
+	timeStart := time.Now()
 	workerCnt := 10
 	ch := make(chan *task)
 	wg := sync.WaitGroup{}
@@ -327,4 +328,5 @@ func main() {
 	close(ch)
 
 	wg.Wait()
+	log.Printf("Time elapsed: %v for %d rows", time.Since(timeStart), sessionSnEnd-sessionSnStart)
 }
