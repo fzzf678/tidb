@@ -47,7 +47,7 @@ func init() {
 
 	//flag.IntVar(&sessionCount, "session-count", 1_000, "chat_session count")
 	flag.IntVar(&userIdStart, "user-id-start", 0, "start of user id range")
-	flag.IntVar(&userIdEnd, "user-id-end", 500, "end of user id range")
+	flag.IntVar(&userIdEnd, "user-id-end", 2_000_000, "end of user id range")
 	flag.IntVar(&sessionSnStart, "session-sn-begin", 0, "chat_session sn begin")
 	flag.IntVar(&sessionSnEnd, "session-sn-end", 200_000, "chat_session sn end")
 	flag.IntVar(&sessionNumPerFile, "session-num-per-file", 200_000, "chat_session sn end")
