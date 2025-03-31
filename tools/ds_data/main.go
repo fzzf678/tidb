@@ -251,9 +251,9 @@ func genData(fileNameSuffix, sessionSn int) {
 		sessionSn++
 	}
 
-	writeDataToS3(fmt.Sprintf("%schat_session.%09d.csv", s3Path, fileNameSuffix), sessionBuilder)
-	writeDataToS3(fmt.Sprintf("%schat_message.%09d.csv", s3Path, fileNameSuffix), messageBuilder)
-	writeDataToS3(fmt.Sprintf("%schat_message_feedback.%09d.csv", s3Path, fileNameSuffix), feedbackBuilder)
+	writeDataToS3(fmt.Sprintf("chat_session.%09d.csv", fileNameSuffix), sessionBuilder)
+	writeDataToS3(fmt.Sprintf("chat_message.%09d.csv", fileNameSuffix), messageBuilder)
+	writeDataToS3(fmt.Sprintf("chat_message_feedback.%09d.csv", fileNameSuffix), feedbackBuilder)
 }
 
 func createExternalStorage() storage.ExternalStorage {
@@ -264,8 +264,7 @@ func createExternalStorage() storage.ExternalStorage {
 		//Provider:        *s3Provider,
 		//Endpoint:        *s3Endpoint,
 	}}
-	s, err := storage.ParseBackend("", &op)
-	//s, err := storage.ParseBackend(*s3Path, &op)
+	s, err := storage.ParseBackend(s3Path, &op)
 	if err != nil {
 		panic(err)
 	}
