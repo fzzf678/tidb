@@ -34,6 +34,7 @@ var (
 	sessionSnEnd      int
 	s3Path            string
 	sessionNumPerFile int
+	workerCount       int
 )
 
 func init() {
@@ -50,6 +51,7 @@ func init() {
 	flag.IntVar(&sessionSnStart, "session-sn-begin", 0, "chat_session sn begin")
 	flag.IntVar(&sessionSnEnd, "session-sn-end", 200_000, "chat_session sn end")
 	flag.IntVar(&sessionNumPerFile, "session-num-per-file", 200_000, "chat_session sn end")
+	flag.IntVar(&workerCount, "worker-count", 10, "chat_session sn end")
 
 	flag.Parse()
 	if printHelp {
@@ -305,11 +307,10 @@ func main() {
 		panic("sessionSnEnd - sessionSnStart must be a multiple of sessionNumPerFile")
 	}
 	timeStart := time.Now()
-	workerCnt := 10
 	ch := make(chan *task)
 	wg := sync.WaitGroup{}
 
-	for i := 0; i < workerCnt; i++ {
+	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
