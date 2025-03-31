@@ -22,13 +22,13 @@ import (
 var (
 	printHelp bool
 
-	sessionFilename  string
-	messageFilename  string
-	feedbackFilename string
+	//sessionFilename  string
+	//messageFilename  string
+	//feedbackFilename string
 
-	sessionCount int
-	userIdStart  int
-	userIdEnd    int
+	//sessionCount int
+	userIdStart int
+	userIdEnd   int
 
 	sessionSnStart    int
 	sessionSnEnd      int
@@ -39,12 +39,12 @@ var (
 func init() {
 	flag.BoolVar(&printHelp, "help", false, "print help")
 
-	flag.StringVar(&sessionFilename, "session-file", "chat_session.csv", "chat_session csv output filename")
-	flag.StringVar(&messageFilename, "message-file", "chat_message.csv", "chat_message csv output filename")
-	flag.StringVar(&feedbackFilename, "feedback-file", "chat_message_feedback.csv", "chat_message_feedback csv output filename")
+	//flag.StringVar(&sessionFilename, "session-file", "chat_session.csv", "chat_session csv output filename")
+	//flag.StringVar(&messageFilename, "message-file", "chat_message.csv", "chat_message csv output filename")
+	//flag.StringVar(&feedbackFilename, "feedback-file", "chat_message_feedback.csv", "chat_message_feedback csv output filename")
 	flag.StringVar(&s3Path, "s3Path", "gcs://global-sort-dir/fzzf678/ds/", "chat_message_feedback csv output filename")
 
-	flag.IntVar(&sessionCount, "session-count", 1_000, "chat_session count")
+	//flag.IntVar(&sessionCount, "session-count", 1_000, "chat_session count")
 	flag.IntVar(&userIdStart, "user-id-start", 0, "start of user id range")
 	flag.IntVar(&userIdEnd, "user-id-end", 500, "end of user id range")
 	flag.IntVar(&sessionSnStart, "session-sn-begin", 0, "chat_session sn begin")
