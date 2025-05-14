@@ -252,12 +252,16 @@ func NewWriteIndexToExternalStoragePipeline(
 	failpoint.Inject("mockWriterMemSize", func() {
 		memSizePerIndex = 1 * size.GB
 	})
+	s, ok := store.(kv.StorageWithPD)
+	if !ok {
+		return nil, errors.New("get pd client failed")
+	}
 
 	srcOp := NewTableScanTaskSource(ctx, store, tbl, startKey, endKey, nil)
 	scanOp := NewTableScanOperator(ctx, sessPool, copCtx, srcChkPool, readerCnt,
 		reorgMeta.GetBatchSize(), reorgMeta, nil)
 	writeOp := NewWriteExternalStoreOperator(
-		ctx, copCtx, sessPool, jobID, subtaskID,
+		ctx, copCtx, sessPool, s.GetPDClient().GetClusterID(ctx), jobID, subtaskID,
 		tbl, indexes, extStore, srcChkPool, writerCnt,
 		onClose, memSizePerIndex, reorgMeta, tikvCodec,
 	)
@@ -636,6 +640,7 @@ func NewWriteExternalStoreOperator(
 	ctx *OperatorCtx,
 	copCtx copr.CopContext,
 	sessPool opSessPool,
+	clusterID uint64,
 	jobID int64,
 	subtaskID int64,
 	tbl table.PhysicalTable,
@@ -670,7 +675,7 @@ func NewWriteExternalStoreOperator(
 					SetGroupOffset(i).
 					SetOnDup(onDuplicateKey)
 				writerID := uuid.New().String()
-				prefix := path.Join(strconv.Itoa(int(jobID)), strconv.Itoa(int(subtaskID)))
+				prefix := path.Join(strconv.Itoa(int(clusterID)), strconv.Itoa(int(jobID)), strconv.Itoa(int(subtaskID)))
 				writer := builder.Build(store, prefix, writerID)
 				writers = append(writers, writer)
 			}
