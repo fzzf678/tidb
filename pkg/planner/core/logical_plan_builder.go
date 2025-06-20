@@ -6958,7 +6958,7 @@ func ExtractTableList(node *resolve.NodeW, asName bool) []*ast.TableName {
 	return tableNames
 }
 
-// tableListExtractor extracts all the TableNames from node.
+// tableListExtractor extracts all the TableSources from node.
 type tableListExtractor struct {
 	asName     bool
 	tableNames []*ast.TableName

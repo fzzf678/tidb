@@ -252,12 +252,89 @@ type preprocessor struct {
 	resolveCtx *resolve.Context
 }
 
+type TableNameCollector struct {
+	TableSources []*ast.TableSource
+}
+
+// ref updatableTableListResolver
+func (t *TableNameCollector) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
+	switch node := in.(type) {
+	case *ast.TableSource:
+		//t.TableSources = append(t.TableSources, in.(*ast.TableSource).Source.(*ast.TableName))
+		t.TableSources = append(t.TableSources, node)
+	}
+	return in, false
+}
+
+func (t *TableNameCollector) Leave(in ast.Node) (out ast.Node, ok bool) {
+	return in, true
+}
+
+type tableWithDBInfo struct {
+	Table *model.TableInfo
+	DB    *model.DBInfo
+}
+
+func (p *preprocessor) getAllDBInfos(node *ast.UpdateStmt) map[*ast.TableSource]*tableWithDBInfo {
+	var m map[*ast.TableSource]*tableWithDBInfo
+	t := TableNameCollector{
+		TableSources: make([]*ast.TableSource, 0),
+	}
+	node.TableRefs.Accept(&t)
+
+	for _, tbl := range t.TableSources {
+		table, err := p.tableByName(tbl.Source.(*ast.TableName))
+		if err != nil {
+			p.err = err
+			return nil
+		}
+		dbInfo, _ := infoschema.SchemaByTable(p.ensureInfoSchema(), table.Meta())
+		m[tbl] = &tableWithDBInfo{
+			Table: table.Meta(),
+			DB:    dbInfo,
+		}
+	}
+	return m
+}
+
+func checkColNameValidAndGetDBInfo(col *ast.ColumnName, tableInfos map[*ast.TableSource]*tableWithDBInfo) (*model.DBInfo, error) {
+	colExist := false
+	var db *model.DBInfo
+	for tbl, tableInfo := range tableInfos {
+		for _, colName := range tableInfo.Table.Cols() {
+			if colName.Name.L == col.Name.L &&
+				(col.Schema.L == "" || col.Schema.L == tableInfo.Table.Name.L) &&
+				(col.Table.L == "" || col.Table.L == tableInfo.Table.Name.L || (tbl.AsName.L != "" && col.Table.L == tbl.AsName.L)) {
+
+				if colExist {
+					return nil, errors.New("Column xxx in field list is ambiguous")
+				}
+				colExist = true
+				db = tableInfo.DB
+			}
+		}
+	}
+	return db, nil
+}
+
 func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 	switch node := in.(type) {
 	case *ast.AdminStmt:
 		p.checkAdminCheckTableGrammar(node)
 	case *ast.DeleteStmt:
 		p.stmtTp = TypeDelete
+		//for _, tbl := range node.Tables.Tables {
+		//	table, err := p.tableByName(tbl)
+		//	if err != nil {
+		//		p.err = err
+		//		return nil, true
+		//	}
+		//	dbInfo, _ := infoschema.SchemaByTable(p.ensureInfoSchema(), table.Meta())
+		//	if dbInfo != nil && dbInfo.ReadOnly() {
+		//		p.err = errors.New("database is in read-only state")
+		//		return nil, true
+		//	}
+		//}
 	case *ast.SelectStmt:
 		p.stmtTp = TypeSelect
 		if node.With != nil {
@@ -270,11 +347,28 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		}
 	case *ast.UpdateStmt:
 		p.stmtTp = TypeUpdate
+		dbInfos := p.getAllDBInfos(node)
+		for _, set := range node.List {
+			// check column if unique like expression.FindFieldName()
+			if dbInfo, err := checkColNameValidAndGetDBInfo(set.Column, dbInfos); err != nil {
+				p.err = err
+				return nil, true
+			} else if dbInfo.ReadOnly() {
+				p.err = errors.New("database is in read-only state")
+				return nil, true
+			}
+		}
 	case *ast.InsertStmt:
 		p.stmtTp = TypeInsert
 		// handle the insert table name imminently
 		// insert into t with t ..., the insert can not see t here. We should hand it before the CTE statement
 		p.handleTableName(node.Table.TableRefs.Left.(*ast.TableSource).Source.(*ast.TableName))
+		//for _, tbl := range p.resolveCtx.GetTableNames() {
+		//	if tbl.DBInfo.ReadOnly() {
+		//		p.err = errors.New("database is in read-only state")
+		//		return nil, true
+		//	}
+		//}
 	case *ast.ExecuteStmt:
 		p.stmtTp = TypeExecute
 		p.resolveExecuteStmt(node)

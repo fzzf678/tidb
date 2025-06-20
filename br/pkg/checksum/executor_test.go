@@ -148,3 +148,20 @@ func TestChecksum(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp4)
 }
+
+func TestAsd(t *testing.T) {
+	store := testkit.CreateMockStore(t)
+	tk := testkit.NewTestKit(t, store)
+	tk.MustExec("drop database test; create database test; use test")
+	tk.MustExec("drop table if exists t;")
+	tk.MustExec("create table t(a int, b int);")
+	tk.MustExec("create table s(a int, c int);")
+	tk.MustExec("insert into t values (1, 1);")
+	tk.MustExec("insert into s values (1, 1);")
+	//tk.MustExec("update t set a = 2;")
+	//tk.MustExec("update t join s on t.a = s.a set t.b = 2, s.b = 2;")
+	tk.MustExec("update t join s on t.a = s.a set t.a = 2;")
+	tk.MustExec("delete t, s from t join s on t.a = s.a where t.a = 1;")
+	tk.MustExec("delete t from t join s on t.a = s.a where t.a = 1;")
+	tk.MustExec("replace into t values (1, 1)")
+}
