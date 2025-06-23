@@ -3984,6 +3984,9 @@ func (b *PlanBuilder) buildInsert(ctx context.Context, insert *ast.InsertStmt) (
 		return nil, infoschema.ErrTableNotExists.FastGenByArgs()
 	}
 	tnW := b.resolveCtx.GetTableName(tn)
+	if tnW.DBInfo.ReadOnly() {
+		return nil, errors.New("database is in read-only mode")
+	}
 	tableInfo := tnW.TableInfo
 	if tableInfo.IsView() {
 		err := errors.Errorf("insert into view %s is not supported now", tableInfo.Name.O)

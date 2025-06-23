@@ -59,7 +59,7 @@ max-index-length = 3072
 index-limit = 64
 
 # enable-table-lock is used to control table lock feature. Default is false, indicate the table lock feature is disabled.
-enable-table-lock = false
+enable-table-lock = true
 
 # delay-clean-table-lock is used to control the time (Milliseconds) of delay before unlock the table in the abnormal situation.
 delay-clean-table-lock = 0

@@ -112,7 +112,7 @@ func (n *AnalyzeTableStmt) Restore(ctx *format.RestoreCtx) error {
 			ctx.WritePlain(",")
 		}
 		if err := table.Restore(ctx); err != nil {
-			return errors.Annotatef(err, "An error occurred while restore AnalyzeTableStmt.TableNames[%d]", i)
+			return errors.Annotatef(err, "An error occurred while restore AnalyzeTableStmt.TableSources[%d]", i)
 		}
 	}
 	if len(n.PartitionNames) != 0 {
