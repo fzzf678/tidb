@@ -327,6 +327,29 @@ func checkColNameValidAndGetDBInfo(col *ast.ColumnName, tableInfos map[*ast.Tabl
 	return db, nil
 }
 
+func (p *preprocessor) schemaReadOnly(dbName ast.CIStr) {
+	if dbName.L == "MYSQL" || dbName.L == "INFORMATION_SCHEMA" ||
+		dbName.L == "PERFORMANCE_SCHEMA" || dbName.L == "SYS" ||
+		dbName.L == "METRICS_SCHEMA" {
+		return
+	}
+	if dbName.L == "" {
+		currentDB := p.sctx.GetSessionVars().CurrentDB
+		if currentDB == "" {
+			p.err = errors.Trace(plannererrors.ErrNoDB)
+			return
+		}
+		dbName = ast.NewCIStr(currentDB)
+	}
+	if db, ok := p.ensureInfoSchema().SchemaByName(dbName); ok {
+		if db.ReadOnly() {
+			p.err = errors.Trace(errors.New("database is in read-only state"))
+		}
+		return
+	}
+	logutil.BgLogger().Info("Check schema read only can't find schema")
+}
+
 func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 	switch node := in.(type) {
 	case *ast.AdminStmt:
@@ -435,9 +458,14 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 	case *ast.AlterDatabaseStmt:
 		p.stmtTp = TypeAlter
 		p.checkAlterDatabaseGrammar(node)
+		if node == nil {
+			return nil, true
+		}
+		p.schemaReadOnly(node.Name)
 	case *ast.DropDatabaseStmt:
 		p.stmtTp = TypeDrop
 		p.checkDropDatabaseGrammar(node)
+		p.schemaReadOnly(node.Name)
 	case *ast.ShowStmt:
 		p.stmtTp = TypeShow
 		p.showTp = node.Tp
