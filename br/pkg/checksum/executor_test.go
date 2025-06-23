@@ -179,4 +179,8 @@ func TestAsd(t *testing.T) {
 	tk.MustExec("insert into t values (1, 1);insert into s values (1, 1);")
 	//tk.MustExec("update t set a = 2;")
 	tk.MustExec("delete from t where a = 2;")
+	// select for update
+	tk.MustExec("select * from t join s for update;")
+	tk.MustExec("select t.a from t join s for update;")
+	tk.MustExec("select t.a+1 from t join s for update;")
 }

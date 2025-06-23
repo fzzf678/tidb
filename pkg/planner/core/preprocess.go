@@ -275,13 +275,13 @@ type tableWithDBInfo struct {
 	DB    *model.DBInfo
 }
 
-func (p *preprocessor) getAllDBInfos(node *ast.UpdateStmt) map[*ast.TableSource]*tableWithDBInfo {
+func (p *preprocessor) getAllDBInfos(node *ast.TableRefsClause) map[*ast.TableSource]*tableWithDBInfo {
 	var m map[*ast.TableSource]*tableWithDBInfo
 	m = make(map[*ast.TableSource]*tableWithDBInfo)
 	t := TableNameCollector{
 		TableSources: make([]*ast.TableSource, 0),
 	}
-	node.TableRefs.Accept(&t)
+	node.Accept(&t)
 
 	for _, tbl := range t.TableSources {
 		name := tbl.Source.(*ast.TableName)
@@ -353,13 +353,26 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 			p.preprocessWith.cteStack = append(p.preprocessWith.cteStack, node.With.CTEs)
 		}
 		p.checkSelectNoopFuncs(node)
+		if node.LockInfo != nil {
+			if node.LockInfo.LockType == ast.SelectLockForUpdate ||
+				((node.LockInfo.LockType == ast.SelectLockForShare || node.LockInfo.LockType == ast.SelectLockForShareNoWait) &&
+					!p.sctx.GetSessionVars().SharedLockPromotion) {
+				dbInfos := p.getAllDBInfos(node.From)
+				for _, tbl := range dbInfos {
+					if tbl.DB.ReadOnly() {
+						p.err = errors.New("database is in read-only state")
+						return nil, true
+					}
+				}
+			}
+		}
 	case *ast.SetOprStmt:
 		if node.With != nil {
 			p.preprocessWith.cteStack = append(p.preprocessWith.cteStack, node.With.CTEs)
 		}
 	case *ast.UpdateStmt:
 		p.stmtTp = TypeUpdate
-		dbInfos := p.getAllDBInfos(node)
+		dbInfos := p.getAllDBInfos(node.TableRefs)
 		for _, set := range node.List {
 			// check column if unique like expression.FindFieldName()
 			if dbInfo, err := checkColNameValidAndGetDBInfo(set.Column, dbInfos); err != nil {
