@@ -156,13 +156,27 @@ func TestAsd(t *testing.T) {
 	tk.MustExec("drop table if exists t;")
 	tk.MustExec("create table t(a int, b int);")
 	tk.MustExec("create table s(a int, c int);")
+	// dml
 	tk.MustExec("insert into t values (1, 1);")
 	tk.MustExec("insert into s values (1, 1);")
-	//tk.MustExec("update t set a = 2;")
-	//tk.MustExec("update t join s on t.a = s.a set t.b = 2, s.b = 2;")
+	tk.MustExec("update t set a = 2;")
+	tk.MustExec("update t join s on t.a = s.a set t.b = 2, s.c = 2;")
 	tk.MustExec("update t join s on t.a = s.a set t.a = 2;")
 	tk.MustExec("delete t, s from t join s on t.a = s.a where t.a = 1;")
 	tk.MustExec("delete t from t join s on t.a = s.a where t.a = 1;")
 	tk.MustExec("delete from t where t.a = 1;")
 	tk.MustExec("replace into t values (1, 1)")
+	// fk
+	tk.MustExec("truncate table t; truncate table s")
+	tk.MustExec("alter table t add index(a)")
+	tk.MustExec("alter table s add index(a)")
+	//tk.MustExec("alter table s add foreign key fk_1(a) references t(a) on update cascade;") // referredFKCascades
+	//tk.MustExec("alter table s add foreign key fk_1(a) references t(a) on update set null;") // referredFKCascades
+	//tk.MustExec("alter table s add foreign key fk_1(a) references t(a) on update RESTRICT;") // referredFKChecks
+	//tk.MustExec("alter table s add foreign key fk_1(a) references t(a) on delete cascade;") //
+	//tk.MustExec("alter table s add foreign key fk_1(a) references t(a) on delete set null;") //
+	//tk.MustExec("alter table s add foreign key fk_1(a) references t(a) on delete RESTRICT;") //
+	tk.MustExec("insert into t values (1, 1);insert into s values (1, 1);")
+	//tk.MustExec("update t set a = 2;")
+	tk.MustExec("delete from t where a = 2;")
 }
