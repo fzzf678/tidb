@@ -186,4 +186,12 @@ func TestAsd(t *testing.T) {
 	// alter/drop db
 	tk.MustExec("alter database test collate utf8mb4_bin;")
 	tk.MustExec("create database ttt; drop database if exists ttt;")
+	// create/alter/rename/truncate/drop table
+	tk.MustExec("create table ttt(a int);")
+	tk.MustExec("alter table ttt add column b int;")
+	tk.MustExec("alter table ttt add index(a);")
+	tk.MustExec("alter table ttt rename to ttt2;")
+	tk.MustExec("rename table ttt2 to ttt;")
+	tk.MustExec("truncate table ttt;")
+	tk.MustExec("drop table if exists ttt;")
 }
