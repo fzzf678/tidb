@@ -442,8 +442,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		p.flag |= inCreateOrDropTable
 		p.resolveCreateTableStmt(node)
 		p.checkCreateTableGrammar(node)
-		var schema ast.CIStr
-		schema = node.Table.Schema
+		schema := node.Table.Schema
 		if schema.L == "" {
 			currentDB := p.sctx.GetSessionVars().CurrentDB
 			if currentDB == "" {
@@ -472,6 +471,23 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		p.flag |= inCreateOrDropTable
 		p.checkCreateViewGrammar(node)
 		p.checkCreateViewWithSelectGrammar(node)
+		schema := node.ViewName.Schema
+		if schema.L == "" {
+			currentDB := p.sctx.GetSessionVars().CurrentDB
+			if currentDB == "" {
+				p.err = errors.Trace(plannererrors.ErrNoDB)
+				return nil, true
+			}
+			schema = ast.NewCIStr(currentDB)
+		}
+		if dbInfo, ok := p.ensureInfoSchema().SchemaByName(schema); ok {
+			if dbInfo.ReadOnly() {
+				p.err = errors.New("database is in read-only state")
+				return nil, true
+			}
+		} else {
+			logutil.BgLogger().Info("Check schema read only can't find schema", zap.String("schema", schema.L))
+		}
 	case *ast.RenameTableStmt:
 		p.stmtTp = TypeRename
 		p.flag |= inCreateOrDropTable
