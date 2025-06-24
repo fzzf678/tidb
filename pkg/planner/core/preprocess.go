@@ -486,6 +486,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 			p.flag |= inCreateOrDropTable
 		}
 		p.checkCreateIndexGrammar(node)
+		p.schemaReadOnlyByTable(node.Table, false)
 	case *ast.AlterTableStmt:
 		p.stmtTp = TypeAlter
 		if p.flag&inPrepare != 0 {
@@ -638,6 +639,8 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		// Used in ALTER TABLE or CREATE TABLE
 		p.checkConstraintGrammar(node)
 	case *ast.TruncateTableStmt:
+		p.schemaReadOnlyByTable(node.Table, false)
+	case *ast.DropIndexStmt:
 		p.schemaReadOnlyByTable(node.Table, false)
 	default:
 		p.flag &= ^parentIsJoin

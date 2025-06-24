@@ -194,4 +194,7 @@ func TestAsd(t *testing.T) {
 	tk.MustExec("rename table ttt2 to ttt;")
 	tk.MustExec("truncate table ttt;")
 	tk.MustExec("drop table if exists ttt;")
+	// create/drop index
+	tk.MustExec("create index idx_a on t(a);")
+	tk.MustExec("drop index idx_a on t;")
 }
