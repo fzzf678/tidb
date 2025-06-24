@@ -562,6 +562,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 	case *ast.ImportIntoStmt:
 		p.stmtTp = TypeImportInto
 		p.flag |= inImportInto
+		p.schemaReadOnlyByTable(node.Table, false)
 	case *ast.CreateSequenceStmt:
 		p.stmtTp = TypeCreate
 		p.flag |= inCreateOrDropTable
@@ -641,6 +642,8 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 	case *ast.TruncateTableStmt:
 		p.schemaReadOnlyByTable(node.Table, false)
 	case *ast.DropIndexStmt:
+		p.schemaReadOnlyByTable(node.Table, false)
+	case *ast.LoadDataStmt:
 		p.schemaReadOnlyByTable(node.Table, false)
 	default:
 		p.flag &= ^parentIsJoin

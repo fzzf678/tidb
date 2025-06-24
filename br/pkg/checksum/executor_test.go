@@ -197,4 +197,8 @@ func TestAsd(t *testing.T) {
 	// create/drop index
 	tk.MustExec("create index idx_a on t(a);")
 	tk.MustExec("drop index idx_a on t;")
+	// load data import into
+	err := tk.ExecToErr("LOAD DATA LOCAL INFILE 'x.csv' INTO TABLE t")
+	require.Error(t, err)
+	tk.MustExec("IMPORT INTO test.t FROM 's3://bucket'")
 }
