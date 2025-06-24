@@ -307,9 +307,12 @@ func (p *preprocessor) getAllDBInfos(node *ast.TableRefsClause) map[*ast.TableSo
 	return m
 }
 
-func checkColNameValidAndGetDBInfo(col *ast.ColumnName, tableInfos map[*ast.TableSource]*tableWithDBInfo) (*model.DBInfo, error) {
+func checkColNameValidAndGetDBInfo(col *ast.ColumnName, tableInfos map[*ast.TableSource]*tableWithDBInfo) (*model.TableInfo, *model.DBInfo, error) {
 	colExist := false
-	var db *model.DBInfo
+	var (
+		db    *model.DBInfo
+		table *model.TableInfo
+	)
 	for tbl, tableInfo := range tableInfos {
 		for _, colName := range tableInfo.Table.Cols() {
 			if colName.Name.L == col.Name.L &&
@@ -317,14 +320,15 @@ func checkColNameValidAndGetDBInfo(col *ast.ColumnName, tableInfos map[*ast.Tabl
 				(col.Table.L == "" || col.Table.L == tableInfo.Table.Name.L || (tbl.AsName.L != "" && col.Table.L == tbl.AsName.L)) {
 
 				if colExist {
-					return nil, errors.New("Column xxx in field list is ambiguous")
+					return nil, nil, errors.New("Column xxx in field list is ambiguous")
 				}
 				colExist = true
 				db = tableInfo.DB
+				table = tableInfo.Table
 			}
 		}
 	}
-	return db, nil
+	return table, db, nil
 }
 
 func (p *preprocessor) schemaReadOnly(dbName ast.CIStr) {
@@ -350,12 +354,16 @@ func (p *preprocessor) schemaReadOnly(dbName ast.CIStr) {
 	logutil.BgLogger().Info("Check schema read only can't find schema")
 }
 
-func (p *preprocessor) schemaReadOnlyByTable(name *ast.TableName, IfExists bool) {
+func (p *preprocessor) schemaReadOnlyByTable(name *ast.TableName, ifExists, checkTempTable bool) {
 	table, err := p.tableByName(name)
 	if err != nil {
-		if !(IfExists && infoschema.ErrTableNotExists.Equal(err)) {
+		if !(ifExists && infoschema.ErrTableNotExists.Equal(err)) {
 			p.err = err
 		}
+		return
+	}
+	// if it is a temporary table, we should not check the read-only state.
+	if checkTempTable && table.Meta().TempTableType != model.TempTableNone {
 		return
 	}
 	if dbInfo, ok := infoschema.SchemaByTable(p.ensureInfoSchema(), table.Meta()); ok {
@@ -380,6 +388,10 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 					p.err = err
 					return nil, true
 				}
+				if table.Meta().TempTableType != model.TempTableNone {
+					// If it is a temporary table, we should not check the read-only state.
+					continue
+				}
 				dbInfo, _ := infoschema.SchemaByTable(p.ensureInfoSchema(), table.Meta())
 				if dbInfo != nil && dbInfo.ReadOnly() {
 					p.err = errors.New("database is in read-only state")
@@ -399,7 +411,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 					!p.sctx.GetSessionVars().SharedLockPromotion) {
 				dbInfos := p.getAllDBInfos(node.From)
 				for _, tbl := range dbInfos {
-					if tbl.DB.ReadOnly() {
+					if tbl.Table.TempTableType != model.TempTableNone && tbl.DB.ReadOnly() {
 						p.err = errors.New("database is in read-only state")
 						return nil, true
 					}
@@ -415,10 +427,10 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		dbInfos := p.getAllDBInfos(node.TableRefs)
 		for _, set := range node.List {
 			// check column if unique like expression.FindFieldName()
-			if dbInfo, err := checkColNameValidAndGetDBInfo(set.Column, dbInfos); err != nil {
+			if tableInfo, dbInfo, err := checkColNameValidAndGetDBInfo(set.Column, dbInfos); err != nil {
 				p.err = err
 				return nil, true
-			} else if dbInfo.ReadOnly() {
+			} else if tableInfo.TempTableType != model.TempTableNone && dbInfo.ReadOnly() {
 				p.err = errors.New("database is in read-only state")
 				return nil, true
 			}
@@ -429,7 +441,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		// insert into t with t ..., the insert can not see t here. We should hand it before the CTE statement
 		p.handleTableName(node.Table.TableRefs.Left.(*ast.TableSource).Source.(*ast.TableName))
 		for _, tbl := range p.resolveCtx.GetTableNames() {
-			if tbl.DBInfo.ReadOnly() {
+			if tbl.TableInfo.TempTableType != model.TempTableNone && tbl.DBInfo.ReadOnly() {
 				p.err = errors.New("database is in read-only state")
 				return nil, true
 			}
@@ -442,29 +454,31 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		p.flag |= inCreateOrDropTable
 		p.resolveCreateTableStmt(node)
 		p.checkCreateTableGrammar(node)
-		schema := node.Table.Schema
-		if schema.L == "" {
-			currentDB := p.sctx.GetSessionVars().CurrentDB
-			if currentDB == "" {
-				p.err = errors.Trace(plannererrors.ErrNoDB)
-				return nil, true
+		if node.TemporaryKeyword == ast.TemporaryNone {
+			schema := node.Table.Schema
+			if schema.L == "" {
+				currentDB := p.sctx.GetSessionVars().CurrentDB
+				if currentDB == "" {
+					p.err = errors.Trace(plannererrors.ErrNoDB)
+					return nil, true
+				}
+				schema = ast.NewCIStr(currentDB)
 			}
-			schema = ast.NewCIStr(currentDB)
-		}
-		if dbInfo, ok := p.ensureInfoSchema().SchemaByName(schema); ok {
-			if dbInfo.ReadOnly() {
-				p.err = errors.New("database is in read-only state")
-				return nil, true
+			if dbInfo, ok := p.ensureInfoSchema().SchemaByName(schema); ok {
+				if dbInfo.ReadOnly() {
+					p.err = errors.New("database is in read-only state")
+					return nil, true
+				}
+			} else {
+				logutil.BgLogger().Info("Check schema read only can't find schema", zap.String("schema", schema.L))
 			}
-		} else {
-			logutil.BgLogger().Info("Check schema read only can't find schema", zap.String("schema", schema.L))
 		}
 	case *ast.DropTableStmt:
 		p.flag |= inCreateOrDropTable
 		p.stmtTp = TypeDrop
 		p.checkDropTableGrammar(node)
 		for _, tbl := range node.Tables {
-			p.schemaReadOnlyByTable(tbl, node.IfExists)
+			p.schemaReadOnlyByTable(tbl, node.IfExists, true)
 		}
 	case *ast.CreateViewStmt:
 		p.stmtTp = TypeCreate
@@ -493,7 +507,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		p.flag |= inCreateOrDropTable
 		p.checkRenameTableGrammar(node)
 		for _, tbl := range node.TableToTables {
-			p.schemaReadOnlyByTable(tbl.OldTable, false)
+			p.schemaReadOnlyByTable(tbl.OldTable, false, false)
 		}
 	case *ast.CreateIndexStmt:
 		// Used in CREATE INDEX ...
@@ -502,7 +516,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 			p.flag |= inCreateOrDropTable
 		}
 		p.checkCreateIndexGrammar(node)
-		p.schemaReadOnlyByTable(node.Table, false)
+		p.schemaReadOnlyByTable(node.Table, false, false)
 	case *ast.AlterTableStmt:
 		p.stmtTp = TypeAlter
 		if p.flag&inPrepare != 0 {
@@ -510,7 +524,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		}
 		p.resolveAlterTableStmt(node)
 		p.checkAlterTableGrammar(node)
-		p.schemaReadOnlyByTable(node.Table, false)
+		p.schemaReadOnlyByTable(node.Table, false, false)
 	case *ast.CreateDatabaseStmt:
 		p.stmtTp = TypeCreate
 		p.checkCreateDatabaseGrammar(node)
@@ -578,7 +592,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 	case *ast.ImportIntoStmt:
 		p.stmtTp = TypeImportInto
 		p.flag |= inImportInto
-		p.schemaReadOnlyByTable(node.Table, false)
+		p.schemaReadOnlyByTable(node.Table, false, false)
 	case *ast.CreateSequenceStmt:
 		p.stmtTp = TypeCreate
 		p.flag |= inCreateOrDropTable
@@ -656,11 +670,11 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		// Used in ALTER TABLE or CREATE TABLE
 		p.checkConstraintGrammar(node)
 	case *ast.TruncateTableStmt:
-		p.schemaReadOnlyByTable(node.Table, false)
+		p.schemaReadOnlyByTable(node.Table, false, true)
 	case *ast.DropIndexStmt:
-		p.schemaReadOnlyByTable(node.Table, false)
+		p.schemaReadOnlyByTable(node.Table, false, false)
 	case *ast.LoadDataStmt:
-		p.schemaReadOnlyByTable(node.Table, false)
+		p.schemaReadOnlyByTable(node.Table, false, false)
 	default:
 		p.flag &= ^parentIsJoin
 	}

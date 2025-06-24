@@ -201,8 +201,16 @@ func TestAsd(t *testing.T) {
 	err := tk.ExecToErr("LOAD DATA LOCAL INFILE 'x.csv' INTO TABLE t")
 	require.Error(t, err)
 	tk.MustExec("IMPORT INTO test.t FROM 's3://bucket'")
-	// create/alter/drop view
+	// create/drop view
 	tk.MustExec("create view v1 as select * from t;")
-	//tk.MustExec("alter view v1 as select * from t where a = 1;")
 	tk.MustExec("drop view if exists v1;")
+	// temporary table
+	tk.MustExec("create temporary table tt(a int);")
+	tk.MustExec("insert into tt values (1),(2);")
+	tk.MustExec("delete from tt where a = 2;")
+	tk.MustExec("update tt set a = 2;")
+	tk.MustExec("replace into tt values (3);")
+	tk.MustExec("select * from tt for update;")
+	tk.MustExec("truncate table tt;")
+	tk.MustExec("drop temporary table tt;")
 }
