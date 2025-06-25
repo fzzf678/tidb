@@ -395,7 +395,12 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 				dbInfo, _ := infoschema.SchemaByTable(p.ensureInfoSchema(), table.Meta())
 				if dbInfo != nil && dbInfo.ReadOnly() {
 					p.err = errors.New("database is in read-only state")
-					return nil, true
+				}
+			}
+		} else {
+			for _, db := range p.getAllDBInfos(node.TableRefs) {
+				if db.Table.TempTableType != model.TempTableNone && db.DB.ReadOnly() {
+					p.err = errors.New("database is in read-only state")
 				}
 			}
 		}

@@ -183,6 +183,7 @@ func TestAsd(t *testing.T) {
 	tk.MustExec("select * from t join s for update;")
 	tk.MustExec("select t.a from t join s for update;")
 	tk.MustExec("select t.a+1 from t join s for update;")
+	tk.MustExec("table t for update;")
 	// alter/drop db
 	tk.MustExec("alter database test collate utf8mb4_bin;")
 	tk.MustExec("create database ttt; drop database if exists ttt;")
