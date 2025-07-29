@@ -18,9 +18,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/tidb/pkg/bindinfo"
 	"github.com/pingcap/tidb/pkg/domain"
 	"github.com/pingcap/tidb/pkg/expression"
 	"github.com/pingcap/tidb/pkg/infoschema"
@@ -32,7 +34,6 @@ import (
 	"github.com/pingcap/tidb/pkg/parser/auth"
 	"github.com/pingcap/tidb/pkg/parser/charset"
 	"github.com/pingcap/tidb/pkg/parser/format"
-	pmodel "github.com/pingcap/tidb/pkg/parser/model"
 	"github.com/pingcap/tidb/pkg/parser/mysql"
 	"github.com/pingcap/tidb/pkg/parser/terror"
 	"github.com/pingcap/tidb/pkg/planner/core/base"
@@ -51,7 +52,6 @@ import (
 	"github.com/pingcap/tidb/pkg/util/dbterror/plannererrors"
 	"github.com/pingcap/tidb/pkg/util/domainutil"
 	"github.com/pingcap/tidb/pkg/util/logutil"
-	utilparser "github.com/pingcap/tidb/pkg/util/parser"
 	"github.com/pingcap/tidb/pkg/util/tracing"
 	"go.uber.org/zap"
 )
@@ -161,7 +161,7 @@ const (
 	// inTxnRetry is set when visiting in transaction retry.
 	inTxnRetry
 	// inCreateOrDropTable is set when visiting create/drop table/view/sequence,
-	// rename table, alter table add foreign key, and BR restore.
+	// rename table, alter table add foreign key, alter table in prepare stmt, and BR restore.
 	// TODO need a better name to clarify it's meaning
 	inCreateOrDropTable
 	// parentIsJoin is set when visiting node's parent is join.
@@ -252,29 +252,205 @@ type preprocessor struct {
 	resolveCtx *resolve.Context
 }
 
+type TableNameCollector struct {
+	TableSources []*ast.TableSource
+}
+
+// Enter implements ast.Visitor interface.
+// ref updatableTableListResolver
+func (t *TableNameCollector) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
+	switch node := in.(type) {
+	case *ast.TableSource:
+		t.TableSources = append(t.TableSources, node)
+	}
+	return in, false
+}
+
+func (t *TableNameCollector) Leave(in ast.Node) (out ast.Node, ok bool) {
+	return in, true
+}
+
+type tableWithDBInfo struct {
+	Table *model.TableInfo
+	DB    *model.DBInfo
+}
+
+func (p *preprocessor) getAllDBInfos(node *ast.TableRefsClause) map[*ast.TableSource]*tableWithDBInfo {
+	var m map[*ast.TableSource]*tableWithDBInfo
+	m = make(map[*ast.TableSource]*tableWithDBInfo)
+	t := TableNameCollector{
+		TableSources: make([]*ast.TableSource, 0),
+	}
+	node.Accept(&t)
+
+	for _, tbl := range t.TableSources {
+		name := tbl.Source.(*ast.TableName)
+		if name.Name.L == "MYSQL" ||
+			name.Name.L == "INFORMATION_SCHEMA" ||
+			name.Name.L == "PERFORMANCE_SCHEMA" ||
+			name.Name.L == "SYS" ||
+			name.Name.L == "METRICS_SCHEMA" {
+			continue
+		}
+		table, err := p.tableByName(name)
+		if err != nil {
+			p.err = err
+			return nil
+		}
+		if dbInfo, ok := infoschema.SchemaByTable(p.ensureInfoSchema(), table.Meta()); ok {
+			m[tbl] = &tableWithDBInfo{
+				Table: table.Meta().Clone(),
+				DB:    dbInfo.Clone(),
+			}
+		}
+	}
+	return m
+}
+
+func checkColNameValidAndGetDBInfo(col *ast.ColumnName, tableInfos map[*ast.TableSource]*tableWithDBInfo) (*model.TableInfo, *model.DBInfo, error) {
+	colExist := false
+	var (
+		db    *model.DBInfo
+		table *model.TableInfo
+	)
+	for tbl, tableInfo := range tableInfos {
+		for _, colName := range tableInfo.Table.Cols() {
+			if colName.Name.L == col.Name.L &&
+				(col.Schema.L == "" || col.Schema.L == tableInfo.Table.Name.L) &&
+				(col.Table.L == "" || col.Table.L == tableInfo.Table.Name.L || (tbl.AsName.L != "" && col.Table.L == tbl.AsName.L)) {
+
+				if colExist {
+					return nil, nil, errors.New("Column xxx in field list is ambiguous")
+				}
+				colExist = true
+				db = tableInfo.DB
+				table = tableInfo.Table
+			}
+		}
+	}
+	return table, db, nil
+}
+
+func (p *preprocessor) schemaReadOnly(dbName ast.CIStr) {
+	if dbName.L == "MYSQL" || dbName.L == "INFORMATION_SCHEMA" ||
+		dbName.L == "PERFORMANCE_SCHEMA" || dbName.L == "SYS" ||
+		dbName.L == "METRICS_SCHEMA" {
+		return
+	}
+	if dbName.L == "" {
+		currentDB := p.sctx.GetSessionVars().CurrentDB
+		if currentDB == "" {
+			p.err = errors.Trace(plannererrors.ErrNoDB)
+			return
+		}
+		dbName = ast.NewCIStr(currentDB)
+	}
+	if db, ok := p.ensureInfoSchema().SchemaByName(dbName); ok {
+		if db.ReadOnly() {
+			p.err = errors.Trace(errors.New("database is in read-only state"))
+		}
+		return
+	}
+	logutil.BgLogger().Info("Check schema read only can't find schema")
+}
+
+func (p *preprocessor) schemaReadOnlyByTable(name *ast.TableName, ifExists, checkTempTable bool) {
+	table, err := p.tableByName(name)
+	if err != nil {
+		if !(ifExists && infoschema.ErrTableNotExists.Equal(err)) {
+			p.err = err
+		}
+		return
+	}
+	// if it is a temporary table, we should not check the read-only state.
+	if checkTempTable && table.Meta().TempTableType != model.TempTableNone {
+		return
+	}
+	if dbInfo, ok := infoschema.SchemaByTable(p.ensureInfoSchema(), table.Meta()); ok {
+		if dbInfo.ReadOnly() {
+			p.err = errors.New("database is in read-only state")
+		}
+	} else {
+		logutil.BgLogger().Info("Check schema read only can't find schema", zap.String("table", name.Name.L))
+	}
+}
+
 func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 	switch node := in.(type) {
 	case *ast.AdminStmt:
 		p.checkAdminCheckTableGrammar(node)
 	case *ast.DeleteStmt:
 		p.stmtTp = TypeDelete
+		if node.Tables != nil {
+			for _, tbl := range node.Tables.Tables {
+				table, err := p.tableByName(tbl)
+				if err != nil {
+					p.err = err
+					return nil, true
+				}
+				if table.Meta().TempTableType != model.TempTableNone {
+					// If it is a temporary table, we should not check the read-only state.
+					continue
+				}
+				dbInfo, _ := infoschema.SchemaByTable(p.ensureInfoSchema(), table.Meta())
+				if dbInfo != nil && dbInfo.ReadOnly() {
+					p.err = errors.New("database is in read-only state")
+				}
+			}
+		} else {
+			for _, db := range p.getAllDBInfos(node.TableRefs) {
+				if db.Table.TempTableType != model.TempTableNone && db.DB.ReadOnly() {
+					p.err = errors.New("database is in read-only state")
+				}
+			}
+		}
 	case *ast.SelectStmt:
 		p.stmtTp = TypeSelect
 		if node.With != nil {
 			p.preprocessWith.cteStack = append(p.preprocessWith.cteStack, node.With.CTEs)
 		}
 		p.checkSelectNoopFuncs(node)
+		if node.LockInfo != nil {
+			if node.LockInfo.LockType == ast.SelectLockForUpdate ||
+				((node.LockInfo.LockType == ast.SelectLockForShare || node.LockInfo.LockType == ast.SelectLockForShareNoWait) &&
+					!p.sctx.GetSessionVars().SharedLockPromotion) {
+				dbInfos := p.getAllDBInfos(node.From)
+				for _, tbl := range dbInfos {
+					if tbl.Table.TempTableType != model.TempTableNone && tbl.DB.ReadOnly() {
+						p.err = errors.New("database is in read-only state")
+						return nil, true
+					}
+				}
+			}
+		}
 	case *ast.SetOprStmt:
 		if node.With != nil {
 			p.preprocessWith.cteStack = append(p.preprocessWith.cteStack, node.With.CTEs)
 		}
 	case *ast.UpdateStmt:
 		p.stmtTp = TypeUpdate
+		dbInfos := p.getAllDBInfos(node.TableRefs)
+		for _, set := range node.List {
+			// check column if unique like expression.FindFieldName()
+			if tableInfo, dbInfo, err := checkColNameValidAndGetDBInfo(set.Column, dbInfos); err != nil {
+				p.err = err
+				return nil, true
+			} else if tableInfo.TempTableType != model.TempTableNone && dbInfo.ReadOnly() {
+				p.err = errors.New("database is in read-only state")
+				return nil, true
+			}
+		}
 	case *ast.InsertStmt:
 		p.stmtTp = TypeInsert
 		// handle the insert table name imminently
 		// insert into t with t ..., the insert can not see t here. We should hand it before the CTE statement
 		p.handleTableName(node.Table.TableRefs.Left.(*ast.TableSource).Source.(*ast.TableName))
+		for _, tbl := range p.resolveCtx.GetTableNames() {
+			if tbl.TableInfo.TempTableType != model.TempTableNone && tbl.DBInfo.ReadOnly() {
+				p.err = errors.New("database is in read-only state")
+				return nil, true
+			}
+		}
 	case *ast.ExecuteStmt:
 		p.stmtTp = TypeExecute
 		p.resolveExecuteStmt(node)
@@ -283,35 +459,96 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		p.flag |= inCreateOrDropTable
 		p.resolveCreateTableStmt(node)
 		p.checkCreateTableGrammar(node)
+		if node.TemporaryKeyword == ast.TemporaryNone {
+			schema := node.Table.Schema
+			if schema.L == "" {
+				currentDB := p.sctx.GetSessionVars().CurrentDB
+				if currentDB == "" {
+					p.err = errors.Trace(plannererrors.ErrNoDB)
+					return nil, true
+				}
+				schema = ast.NewCIStr(currentDB)
+			}
+			if dbInfo, ok := p.ensureInfoSchema().SchemaByName(schema); ok {
+				if dbInfo.ReadOnly() {
+					p.err = errors.New("database is in read-only state")
+					return nil, true
+				}
+			} else {
+				logutil.BgLogger().Info("Check schema read only can't find schema", zap.String("schema", schema.L))
+			}
+		}
+	case *ast.DropTableStmt:
+		p.flag |= inCreateOrDropTable
+		p.stmtTp = TypeDrop
+		p.checkDropTableGrammar(node)
+		for _, tbl := range node.Tables {
+			p.schemaReadOnlyByTable(tbl, node.IfExists, true)
+		}
 	case *ast.CreateViewStmt:
 		p.stmtTp = TypeCreate
 		p.flag |= inCreateOrDropTable
 		p.checkCreateViewGrammar(node)
 		p.checkCreateViewWithSelectGrammar(node)
-	case *ast.DropTableStmt:
-		p.flag |= inCreateOrDropTable
-		p.stmtTp = TypeDrop
-		p.checkDropTableGrammar(node)
+		schema := node.ViewName.Schema
+		if schema.L == "" {
+			currentDB := p.sctx.GetSessionVars().CurrentDB
+			if currentDB == "" {
+				p.err = errors.Trace(plannererrors.ErrNoDB)
+				return nil, true
+			}
+			schema = ast.NewCIStr(currentDB)
+		}
+		if dbInfo, ok := p.ensureInfoSchema().SchemaByName(schema); ok {
+			if dbInfo.ReadOnly() {
+				p.err = errors.New("database is in read-only state")
+				return nil, true
+			}
+		} else {
+			logutil.BgLogger().Info("Check schema read only can't find schema", zap.String("schema", schema.L))
+		}
 	case *ast.RenameTableStmt:
 		p.stmtTp = TypeRename
 		p.flag |= inCreateOrDropTable
 		p.checkRenameTableGrammar(node)
+		for _, tbl := range node.TableToTables {
+			p.schemaReadOnlyByTable(tbl.OldTable, false, false)
+		}
 	case *ast.CreateIndexStmt:
+		// Used in CREATE INDEX ...
 		p.stmtTp = TypeCreate
+		if p.flag&inPrepare != 0 {
+			p.flag |= inCreateOrDropTable
+		}
 		p.checkCreateIndexGrammar(node)
+		p.schemaReadOnlyByTable(node.Table, false, false)
 	case *ast.AlterTableStmt:
 		p.stmtTp = TypeAlter
+		if p.flag&inPrepare != 0 {
+			p.flag |= inCreateOrDropTable
+		}
 		p.resolveAlterTableStmt(node)
 		p.checkAlterTableGrammar(node)
+		p.schemaReadOnlyByTable(node.Table, false, false)
 	case *ast.CreateDatabaseStmt:
 		p.stmtTp = TypeCreate
 		p.checkCreateDatabaseGrammar(node)
 	case *ast.AlterDatabaseStmt:
 		p.stmtTp = TypeAlter
 		p.checkAlterDatabaseGrammar(node)
+		//for _, opt := range node.Options {
+		//	if opt.Tp != ast.AlterDatabaseOptionReadOnly {
+		//		p.schemaReadOnly(node.Name)
+		//		if p.err != nil {
+		//			break
+		//		}
+		//	}
+		//}
+		p.schemaReadOnly(node.Name)
 	case *ast.DropDatabaseStmt:
 		p.stmtTp = TypeDrop
 		p.checkDropDatabaseGrammar(node)
+		p.schemaReadOnly(node.Name)
 	case *ast.ShowStmt:
 		p.stmtTp = TypeShow
 		p.showTp = node.Tp
@@ -368,6 +605,7 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 	case *ast.ImportIntoStmt:
 		p.stmtTp = TypeImportInto
 		p.flag |= inImportInto
+		p.schemaReadOnlyByTable(node.Table, false, false)
 	case *ast.CreateSequenceStmt:
 		p.stmtTp = TypeCreate
 		p.flag |= inCreateOrDropTable
@@ -392,7 +630,9 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 		}
 	case *ast.TableSource:
 		isModeOracle := p.sctx.GetSessionVars().SQLMode&mysql.ModeOracle != 0
-		if _, ok := node.Source.(*ast.SelectStmt); ok && !isModeOracle && len(node.AsName.L) == 0 {
+		_, isSelectStmt := node.Source.(*ast.SelectStmt)
+		_, isSetOprStmt := node.Source.(*ast.SetOprStmt)
+		if (isSelectStmt || isSetOprStmt) && !isModeOracle && len(node.AsName.L) == 0 {
 			p.err = dbterror.ErrDerivedMustHaveAlias.GenWithStackByArgs()
 		}
 		if v, ok := node.Source.(*ast.TableName); ok && v.TableSample != nil {
@@ -439,6 +679,15 @@ func (p *preprocessor) Enter(in ast.Node) (out ast.Node, skipChildren bool) {
 				p.varsReadonly[node.Name] = struct{}{}
 			}
 		}
+	case *ast.Constraint:
+		// Used in ALTER TABLE or CREATE TABLE
+		p.checkConstraintGrammar(node)
+	case *ast.TruncateTableStmt:
+		p.schemaReadOnlyByTable(node.Table, false, true)
+	case *ast.DropIndexStmt:
+		p.schemaReadOnlyByTable(node.Table, false, false)
+	case *ast.LoadDataStmt:
+		p.schemaReadOnlyByTable(node.Table, false, false)
 	default:
 		p.flag &= ^parentIsJoin
 	}
@@ -516,7 +765,7 @@ func (p *preprocessor) tableByName(tn *ast.TableName) (table.Table, error) {
 	if currentDB == "" {
 		return nil, errors.Trace(plannererrors.ErrNoDB)
 	}
-	sName := pmodel.NewCIStr(currentDB)
+	sName := ast.NewCIStr(currentDB)
 	is := p.ensureInfoSchema()
 
 	// for 'SHOW CREATE VIEW/SEQUENCE ...' statement, ignore local temporary tables.
@@ -594,8 +843,8 @@ func (p *preprocessor) checkBindGrammar(originNode, hintedNode ast.StmtNode, def
 	aliasChecker := &aliasChecker{}
 	originNode.Accept(aliasChecker)
 	hintedNode.Accept(aliasChecker)
-	originSQL := parser.NormalizeForBinding(utilparser.RestoreWithDefaultDB(originNode, defaultDB, originNode.Text()), false)
-	hintedSQL := parser.NormalizeForBinding(utilparser.RestoreWithDefaultDB(hintedNode, defaultDB, hintedNode.Text()), false)
+	originSQL, _ := bindinfo.NormalizeStmtForBinding(originNode, defaultDB, false)
+	hintedSQL, _ := bindinfo.NormalizeStmtForBinding(hintedNode, defaultDB, false)
 	if originSQL != hintedSQL {
 		p.err = errors.Errorf("hinted sql and origin sql don't match when hinted sql erase the hint info, after erase hint info, originSQL:%s, hintedSQL:%s", originSQL, hintedSQL)
 	}
@@ -627,7 +876,7 @@ func (p *preprocessor) Leave(in ast.Node) (out ast.Node, ok bool) {
 				break
 			}
 		}
-		if !valid {
+		if x.Format != "" && !valid {
 			p.err = plannererrors.ErrUnknownExplainFormat.GenWithStackByArgs(x.Format)
 		}
 	case *ast.TableName:
@@ -874,7 +1123,7 @@ func (p *preprocessor) checkAdminCheckTableGrammar(stmt *ast.AdminStmt) {
 
 func (p *preprocessor) checkCreateTableGrammar(stmt *ast.CreateTableStmt) {
 	if stmt.ReferTable != nil {
-		schema := pmodel.NewCIStr(p.sctx.GetSessionVars().CurrentDB)
+		schema := ast.NewCIStr(p.sctx.GetSessionVars().CurrentDB)
 		if stmt.ReferTable.Schema.String() != "" {
 			schema = stmt.ReferTable.Schema
 		}
@@ -1050,7 +1299,7 @@ func (p *preprocessor) checkDropTableGrammar(stmt *ast.DropTableStmt) {
 }
 
 func (p *preprocessor) checkDropTemporaryTableGrammar(stmt *ast.DropTableStmt) {
-	currentDB := pmodel.NewCIStr(p.sctx.GetSessionVars().CurrentDB)
+	currentDB := ast.NewCIStr(p.sctx.GetSessionVars().CurrentDB)
 	for _, t := range stmt.Tables {
 		if util.IsInCorrectIdentifierName(t.Name.String()) {
 			p.err = dbterror.ErrWrongTableName.GenWithStackByArgs(t.Name.String())
@@ -1115,7 +1364,7 @@ func isTableAliasDuplicate(node ast.ResultSetNode, tableAliases map[string]any) 
 		if tabName.L == "" {
 			if tableNode, ok := ts.Source.(*ast.TableName); ok {
 				if tableNode.Schema.L != "" {
-					tabName = pmodel.NewCIStr(fmt.Sprintf("%s.%s", tableNode.Schema.L, tableNode.Name.L))
+					tabName = ast.NewCIStr(fmt.Sprintf("%s.%s", tableNode.Schema.L, tableNode.Name.L))
 				} else {
 					tabName = tableNode.Name
 				}
@@ -1154,6 +1403,64 @@ func checkColumnOptions(isTempTable bool, ops []*ast.ColumnOption) (int, error) 
 	return isPrimary, nil
 }
 
+func checkIndexOptions(isColumnar bool, indexOptions *ast.IndexOption) error {
+	if isColumnar && indexOptions == nil {
+		return dbterror.ErrUnsupportedIndexType.FastGen("COLUMNAR INDEX must specify 'USING <index_type>'")
+	}
+	if indexOptions == nil {
+		return nil
+	}
+	if isColumnar {
+		switch indexOptions.Tp {
+		case ast.IndexTypeVector, ast.IndexTypeInverted:
+			// Accepted
+		case ast.IndexTypeFulltext:
+			if indexOptions.ParserName.L != "" && model.GetFullTextParserTypeBySQLName(indexOptions.ParserName.L) == model.FullTextParserTypeInvalid {
+				return dbterror.ErrUnsupportedIndexType.FastGen("Unsupported parser '%s'", indexOptions.ParserName.O)
+			}
+		case ast.IndexTypeInvalid:
+			return dbterror.ErrUnsupportedIndexType.FastGen("COLUMNAR INDEX must specify 'USING <index_type>'")
+		default:
+			return dbterror.ErrUnsupportedIndexType.FastGen("'USING %s' is not supported for COLUMNAR INDEX", indexOptions.Tp)
+		}
+		if indexOptions.Visibility == ast.IndexVisibilityInvisible {
+			return dbterror.ErrUnsupportedIndexType.FastGen("INVISIBLE can not be used in %s INDEX", indexOptions.Tp)
+		}
+	} else {
+		switch indexOptions.Tp {
+		case ast.IndexTypeHNSW:
+			return dbterror.ErrUnsupportedIndexType.FastGen("'USING HNSW' can be only used for VECTOR INDEX")
+		case ast.IndexTypeVector, ast.IndexTypeInverted, ast.IndexTypeFulltext:
+			return dbterror.ErrUnsupportedIndexType.FastGen("'USING %s' can be only used for COLUMNAR INDEX", indexOptions.Tp)
+		default:
+			// Accepted
+		}
+	}
+
+	return nil
+}
+
+func checkIndexSpecs(indexOptions *ast.IndexOption, partSpecs []*ast.IndexPartSpecification) error {
+	if indexOptions == nil {
+		return nil
+	}
+	switch indexOptions.Tp {
+	case ast.IndexTypeVector:
+		if len(partSpecs) != 1 || partSpecs[0].Expr == nil {
+			return dbterror.ErrUnsupportedAddColumnarIndex.FastGen("VECTOR INDEX must specify an expression like ((VEC_XX_DISTANCE(<COLUMN>)))")
+		}
+	case ast.IndexTypeInverted:
+		if len(partSpecs) != 1 || partSpecs[0].Column == nil {
+			return dbterror.ErrUnsupportedAddColumnarIndex.FastGen("COLUMNAR INDEX of INVERTED type must specify one column name")
+		}
+	case ast.IndexTypeFulltext:
+		if len(partSpecs) != 1 || partSpecs[0].Column == nil {
+			return dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index must specify one column name")
+		}
+	}
+	return nil
+}
+
 func (p *preprocessor) checkCreateIndexGrammar(stmt *ast.CreateIndexStmt) {
 	tName := stmt.Table.Name.String()
 	if util.IsInCorrectIdentifierName(tName) {
@@ -1165,6 +1472,60 @@ func (p *preprocessor) checkCreateIndexGrammar(stmt *ast.CreateIndexStmt) {
 		return
 	}
 	p.err = checkIndexInfo(stmt.IndexName, stmt.IndexPartSpecifications)
+	if p.err != nil {
+		return
+	}
+
+	// Rewrite CREATE VECTOR INDEX into CREATE COLUMNAR INDEX
+	if stmt.KeyType == ast.IndexKeyTypeVector {
+		if stmt.IndexOption.Tp != ast.IndexTypeInvalid && stmt.IndexOption.Tp != ast.IndexTypeHNSW {
+			p.err = dbterror.ErrUnsupportedIndexType.FastGen("'USING %s' is not supported for VECTOR INDEX", stmt.IndexOption.Tp)
+			return
+		}
+		stmt.KeyType = ast.IndexKeyTypeColumnar
+		stmt.IndexOption.Tp = ast.IndexTypeVector
+	}
+	// Rewrite CREATE FULLTEXT INDEX into CREATE COLUMNAR INDEX
+	if stmt.KeyType == ast.IndexKeyTypeFulltext {
+		if stmt.IndexOption.Tp != ast.IndexTypeInvalid {
+			p.err = dbterror.ErrUnsupportedIndexType.FastGen("'USING %s' is not supported for FULLTEXT INDEX", stmt.IndexOption.Tp)
+			return
+		}
+		stmt.KeyType = ast.IndexKeyTypeColumnar
+		stmt.IndexOption.Tp = ast.IndexTypeFulltext
+	}
+
+	p.err = checkIndexOptions(stmt.KeyType == ast.IndexKeyTypeColumnar, stmt.IndexOption)
+	if p.err != nil {
+		return
+	}
+	p.err = checkIndexSpecs(stmt.IndexOption, stmt.IndexPartSpecifications)
+}
+
+func (p *preprocessor) checkConstraintGrammar(stmt *ast.Constraint) {
+	// Rewrite VECTOR INDEX into COLUMNAR INDEX
+	if stmt.Tp == ast.ConstraintVector {
+		if stmt.Option.Tp != ast.IndexTypeInvalid && stmt.Option.Tp != ast.IndexTypeHNSW {
+			p.err = dbterror.ErrUnsupportedIndexType.FastGen("'USING %s' is not supported for VECTOR INDEX", stmt.Option.Tp)
+			return
+		}
+		stmt.Tp = ast.ConstraintColumnar
+		stmt.Option.Tp = ast.IndexTypeVector
+	}
+	if stmt.Tp == ast.ConstraintFulltext {
+		if stmt.Option.Tp != ast.IndexTypeInvalid {
+			p.err = dbterror.ErrUnsupportedIndexType.FastGen("'USING %s' is not supported for FULLTEXT INDEX", stmt.Option.Tp)
+			return
+		}
+		stmt.Tp = ast.ConstraintColumnar
+		stmt.Option.Tp = ast.IndexTypeFulltext
+	}
+
+	p.err = checkIndexOptions(stmt.Tp == ast.ConstraintColumnar, stmt.Option)
+	if p.err != nil {
+		return
+	}
+	p.err = checkIndexSpecs(stmt.Option, stmt.Keys)
 }
 
 func (p *preprocessor) checkSelectNoopFuncs(stmt *ast.SelectStmt) {
@@ -1589,11 +1950,9 @@ func (p *preprocessor) stmtType() string {
 
 func (p *preprocessor) handleTableName(tn *ast.TableName) {
 	if tn.Schema.L == "" {
-		for _, cte := range p.preprocessWith.cteCanUsed {
-			if cte == tn.Name.L {
-				p.preprocessWith.UpdateCTEConsumerCount(tn.Name.L)
-				return
-			}
+		if slices.Contains(p.preprocessWith.cteCanUsed, tn.Name.L) {
+			p.preprocessWith.UpdateCTEConsumerCount(tn.Name.L)
+			return
 		}
 
 		currentDB := p.sctx.GetSessionVars().CurrentDB
@@ -1602,7 +1961,7 @@ func (p *preprocessor) handleTableName(tn *ast.TableName) {
 			return
 		}
 
-		tn.Schema = pmodel.NewCIStr(currentDB)
+		tn.Schema = ast.NewCIStr(currentDB)
 	}
 
 	if p.flag&inCreateOrDropTable > 0 {
@@ -1640,7 +1999,7 @@ func (p *preprocessor) handleTableName(tn *ast.TableName) {
 	}
 
 	if !p.skipLockMDL() {
-		table, err = tryLockMDLAndUpdateSchemaIfNecessary(p.ctx, p.sctx.GetPlanCtx(), pmodel.NewCIStr(tn.Schema.L), table, p.ensureInfoSchema())
+		table, err = tryLockMDLAndUpdateSchemaIfNecessary(p.ctx, p.sctx.GetPlanCtx(), ast.NewCIStr(tn.Schema.L), table, p.ensureInfoSchema())
 		if err != nil {
 			p.err = err
 			return
@@ -1701,7 +2060,7 @@ func (p *preprocessor) resolveShowStmt(node *ast.ShowStmt) {
 			node.DBName = p.sctx.GetSessionVars().CurrentDB
 		}
 	} else if node.Table != nil && node.Table.Schema.L == "" {
-		node.Table.Schema = pmodel.NewCIStr(node.DBName)
+		node.Table.Schema = ast.NewCIStr(node.DBName)
 	}
 	if node.User != nil && node.User.CurrentUser {
 		// Fill the Username and Hostname with the current user.
@@ -1746,7 +2105,7 @@ func (p *preprocessor) resolveAlterTableStmt(node *ast.AlterTableStmt) {
 		if spec.Tp == ast.AlterTableAddConstraint && spec.Constraint.Refer != nil {
 			table := spec.Constraint.Refer.Table
 			if table.Schema.L == "" && node.Table.Schema.L != "" {
-				table.Schema = pmodel.NewCIStr(node.Table.Schema.L)
+				table.Schema = ast.NewCIStr(node.Table.Schema.L)
 			}
 			if spec.Constraint.Tp == ast.ConstraintForeignKey {
 				// when foreign_key_checks is off, should ignore err when refer table is not exists.
@@ -1861,7 +2220,7 @@ func (p *preprocessor) hasAutoConvertWarning(colDef *ast.ColumnDef) bool {
 	return false
 }
 
-func tryLockMDLAndUpdateSchemaIfNecessary(ctx context.Context, sctx base.PlanContext, dbName pmodel.CIStr, tbl table.Table, is infoschema.InfoSchema) (retTbl table.Table, err error) {
+func tryLockMDLAndUpdateSchemaIfNecessary(ctx context.Context, sctx base.PlanContext, dbName ast.CIStr, tbl table.Table, is infoschema.InfoSchema) (retTbl table.Table, err error) {
 	skipLock := false
 	shouldLockMDL := false
 	var lockedID int64
@@ -2025,7 +2384,7 @@ type aliasChecker struct{}
 func (*aliasChecker) Enter(in ast.Node) (ast.Node, bool) {
 	if deleteStmt, ok := in.(*ast.DeleteStmt); ok {
 		// 1. check the tableRefs of deleteStmt to find the alias
-		var aliases []*pmodel.CIStr
+		var aliases []*ast.CIStr
 		if deleteStmt.TableRefs != nil && deleteStmt.TableRefs.TableRefs != nil {
 			tableRefs := deleteStmt.TableRefs.TableRefs
 			if val := getTableRefsAlias(tableRefs.Left); val != nil {
@@ -2054,7 +2413,7 @@ func (*aliasChecker) Enter(in ast.Node) (ast.Node, bool) {
 	return in, false
 }
 
-func getTableRefsAlias(tableRefs ast.ResultSetNode) *pmodel.CIStr {
+func getTableRefsAlias(tableRefs ast.ResultSetNode) *ast.CIStr {
 	switch v := tableRefs.(type) {
 	case *ast.Join:
 		if v.Left != nil {
