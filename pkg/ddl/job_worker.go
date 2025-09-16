@@ -909,9 +909,23 @@ func (w *worker) runOneJobStep(
 									zap.Int64("batch size", latestJob.ReorgMeta.BatchSize.Load()),
 									zap.Int64("max write speed", latestJob.ReorgMeta.MaxWriteSpeed.Load()),
 								)
-								job.ReorgMeta.SetConcurrency(latestJob.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter())))
-								job.ReorgMeta.SetBatchSize(latestJob.ReorgMeta.GetBatchSizeOrDefault(int(variable.GetDDLReorgBatchSize())))
-								job.ReorgMeta.SetMaxWriteSpeed(latestJob.ReorgMeta.GetMaxWriteSpeedOrDefault())
+								targetConcurrency := latestJob.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter()))
+								targetBatchSize := latestJob.ReorgMeta.GetBatchSizeOrDefault(int(variable.GetDDLReorgBatchSize()))
+								targetMaxWriteSpeed := latestJob.ReorgMeta.GetMaxWriteSpeedOrDefault()
+								job.ReorgMeta.SetConcurrency(targetConcurrency)
+								job.ReorgMeta.SetBatchSize(targetBatchSize)
+								job.ReorgMeta.SetMaxWriteSpeed(targetMaxWriteSpeed)
+								logutil.DDLLogger().Info("update job reorg meta",
+									zap.Int64("job concurrency", job.ReorgMeta.Concurrency.Load()),
+									zap.Int64("job batch size", job.ReorgMeta.BatchSize.Load()),
+									zap.Int64("job max write speed", job.ReorgMeta.MaxWriteSpeed.Load()),
+									zap.Int64("latest concurrency", latestJob.ReorgMeta.Concurrency.Load()),
+									zap.Int64("latest batch size", latestJob.ReorgMeta.BatchSize.Load()),
+									zap.Int64("latest max write speed", latestJob.ReorgMeta.MaxWriteSpeed.Load()),
+									zap.Int("target concurrency", targetConcurrency),
+									zap.Int("target batch size", targetBatchSize),
+									zap.Int("target max write speed", targetMaxWriteSpeed),
+								)
 							} else {
 								logutil.DDLLogger().Info("job is not alterable",
 									zap.Int64("job id", latestJob.ID), zap.Stringer("type", latestJob.Type),

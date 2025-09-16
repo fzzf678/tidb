@@ -1108,7 +1108,7 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 							zap.Int("current worker count", scheduler.currentWorkerSize()))
 					}
 				} else {
-					logutil.DDLLogger().Info("ddl job config no need to adjust")
+					logutil.DDLLogger().Info("currentWorkerCnt = targetWorkerCnt")
 				}
 			}
 		}
