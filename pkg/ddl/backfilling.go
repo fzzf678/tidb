@@ -1108,7 +1108,12 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 							zap.Int("current worker count", scheduler.currentWorkerSize()))
 					}
 				} else {
-					logutil.DDLLogger().Info("currentWorkerCnt = targetWorkerCnt")
+					logutil.DDLLogger().Info("currentWorkerCnt = targetWorkerCnt",
+						zap.Int("currentWorkerCnt", currentWorkerCnt),
+						zap.Int64("job concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+						zap.Int64("job batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+						zap.Int64("job max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+					)
 				}
 			}
 		}
