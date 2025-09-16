@@ -912,6 +912,10 @@ func (w *worker) runOneJobStep(
 								job.ReorgMeta.SetConcurrency(latestJob.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter())))
 								job.ReorgMeta.SetBatchSize(latestJob.ReorgMeta.GetBatchSizeOrDefault(int(variable.GetDDLReorgBatchSize())))
 								job.ReorgMeta.SetMaxWriteSpeed(latestJob.ReorgMeta.GetMaxWriteSpeedOrDefault())
+							} else {
+								logutil.DDLLogger().Info("job is not alterable",
+									zap.Int64("job id", latestJob.ID), zap.Stringer("type", latestJob.Type),
+								)
 							}
 						}
 					}

@@ -1107,6 +1107,8 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 						logutil.DDLLogger().Info("adjust ddl job config success",
 							zap.Int("current worker count", scheduler.currentWorkerSize()))
 					}
+				} else {
+					logutil.DDLLogger().Info("ddl job config no need to adjust")
 				}
 			}
 		}
