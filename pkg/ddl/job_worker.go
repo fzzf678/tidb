@@ -904,6 +904,11 @@ func (w *worker) runOneJobStep(
 							return
 						case model.JobStateRunning:
 							if latestJob.IsAlterable() {
+								logutil.DDLLogger().Info("job is alterable",
+									zap.Int64("concurrency", latestJob.ReorgMeta.Concurrency.Load()),
+									zap.Int64("batch size", latestJob.ReorgMeta.BatchSize.Load()),
+									zap.Int64("max write speed", latestJob.ReorgMeta.MaxWriteSpeed.Load()),
+								)
 								job.ReorgMeta.SetConcurrency(latestJob.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter())))
 								job.ReorgMeta.SetBatchSize(latestJob.ReorgMeta.GetBatchSizeOrDefault(int(variable.GetDDLReorgBatchSize())))
 								job.ReorgMeta.SetMaxWriteSpeed(latestJob.ReorgMeta.GetMaxWriteSpeedOrDefault())
