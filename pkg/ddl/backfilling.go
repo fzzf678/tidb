@@ -965,6 +965,11 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 	bfWorkerType backfillerType,
 	reorgInfo *reorgInfo,
 ) (err error) {
+	logutil.DDLLogger().Info("writePhysicalTableRecord_1",
+		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+	)
 	startKey, endKey := reorgInfo.StartKey, reorgInfo.EndKey
 
 	if err := dc.isReorgRunnable(ctx, false); err != nil {
@@ -1087,6 +1092,11 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 		return nil
 	})
 
+	logutil.DDLLogger().Info("writePhysicalTableRecord_2",
+		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+	)
 	// update the worker cnt goroutine
 	go func() {
 		ticker := time.NewTicker(UpdateDDLJobReorgCfgInterval)

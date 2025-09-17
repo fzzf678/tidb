@@ -511,6 +511,11 @@ func (w *worker) updatePhysicalTableRow(
 		return nil
 	}
 	if tbl, ok := t.(table.PhysicalTable); ok {
+		logutil.DDLLogger().Info("updatePhysicalTableRow",
+			zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+			zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+			zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+		)
 		return w.writePhysicalTableRecord(ctx, w.sessPool, tbl, typeUpdateColumnWorker, reorgInfo)
 	}
 	return dbterror.ErrCancelledDDLJob.GenWithStack("internal error for phys tbl id: %d tbl id: %d", reorgInfo.PhysicalTableID, t.Meta().ID)

@@ -176,6 +176,11 @@ func (w *worker) onModifyColumn(jobCtx *jobContext, job *model.Job) (ver int64, 
 		}
 	}
 
+	logutil.DDLLogger().Info("onModifyColumn",
+		zap.Int64("job concurrency", job.ReorgMeta.Concurrency.Load()),
+		zap.Int64("job batch size", job.ReorgMeta.BatchSize.Load()),
+		zap.Int64("job max write speed", job.ReorgMeta.MaxWriteSpeed.Load()),
+	)
 	return w.doModifyColumnTypeWithData(
 		jobCtx, job, dbInfo, tblInfo, changingCol, oldCol, args)
 }
@@ -555,6 +560,11 @@ func (w *worker) doModifyColumnTypeWithData(
 		if job.MultiSchemaInfo != nil {
 			done, ver, err = doReorgWorkForModifyColumnMultiSchema(w, jobCtx, job, tbl, oldCol, changingCol, changingIdxs)
 		} else {
+			logutil.DDLLogger().Info("doModifyColumnTypeWithData",
+				zap.Int64("job concurrency", job.ReorgMeta.Concurrency.Load()),
+				zap.Int64("job batch size", job.ReorgMeta.BatchSize.Load()),
+				zap.Int64("job max write speed", job.ReorgMeta.MaxWriteSpeed.Load()),
+			)
 			done, ver, err = doReorgWorkForModifyColumn(w, jobCtx, job, tbl, oldCol, changingCol, changingIdxs)
 		}
 		if !done {
@@ -629,6 +639,14 @@ func doReorgWorkForModifyColumn(w *worker, jobCtx *jobContext, job *model.Job, t
 		// and then run the reorg next time.
 		return false, ver, errors.Trace(err)
 	}
+	logutil.DDLLogger().Info("doReorgWorkForModifyColumn after get reorg info",
+		zap.Int64("job concurrency", job.ReorgMeta.Concurrency.Load()),
+		zap.Int64("job batch size", job.ReorgMeta.BatchSize.Load()),
+		zap.Int64("job max write speed", job.ReorgMeta.MaxWriteSpeed.Load()),
+		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+	)
 
 	// Inject a failpoint so that we can pause here and do verification on other components.
 	// With a failpoint-enabled version of TiDB, you can trigger this failpoint by the following command:

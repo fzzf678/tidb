@@ -358,6 +358,11 @@ func (w *worker) runReorgJob(
 		}
 	}
 
+	logutil.DDLLogger().Info("doReorgWorkForModifyColumn after get reorg info",
+		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+	)
 	rc := w.getReorgCtx(job.ID)
 	if rc == nil {
 		// This job is cancelling, we should return ErrCancelledDDLJob directly.
