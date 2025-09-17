@@ -926,6 +926,7 @@ func (w *worker) runOneJobStep(
 									zap.Int("target batch size", targetBatchSize),
 									zap.Int("target max write speed", targetMaxWriteSpeed),
 									zap.String("reorgInfo address", fmt.Sprintf("address %p %p", job.ReorgMeta, &job.ReorgMeta)),
+									zap.String("job address", fmt.Sprintf("address %p %p", job, &job)),
 								)
 							} else {
 								logutil.DDLLogger().Info("job is not alterable",
