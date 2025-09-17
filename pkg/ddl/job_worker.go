@@ -535,10 +535,12 @@ func (w *worker) transitOneJobStep(
 ) (int64, error) {
 	failpoint.InjectCall("beforeTransitOneJobStep", jobW)
 	job := jobW.Job
-	logutil.DDLLogger().Info("transitOneJobStep",
-		zap.Int64("job ID", job.ID),
-		zap.String("job address", fmt.Sprintf("%p", job)),
-	)
+	if job.Type == model.ActionModifyColumn {
+		logutil.DDLLogger().Info("transitOneJobStep",
+			zap.Int64("job ID", job.ID),
+			zap.String("job address", fmt.Sprintf("%p", job)),
+		)
+	}
 	txn, err := w.prepareTxn(job)
 	if err != nil {
 		return 0, err
