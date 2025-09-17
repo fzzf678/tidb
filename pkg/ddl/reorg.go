@@ -358,7 +358,7 @@ func (w *worker) runReorgJob(
 		}
 	}
 
-	logutil.DDLLogger().Info("doReorgWorkForModifyColumn after get reorg info",
+	logutil.DDLLogger().Info("runReorgJob",
 		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
@@ -380,6 +380,11 @@ func (w *worker) runReorgJob(
 
 		beOwnerTS := w.ddlCtx.reorgCtx.getOwnerTS()
 		rc = w.newReorgCtx(reorgInfo.Job.ID, reorgInfo.Job.GetRowCount())
+		logutil.DDLLogger().Info("runReorgJob rc",
+			zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+			zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+			zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+		)
 		w.wg.Run(func() {
 			err := reorgFn()
 			rc.doneCh <- reorgFnResult{ownerTS: beOwnerTS, err: err}
@@ -441,6 +446,11 @@ func (w *worker) runReorgJob(
 
 			rc.resetWarnings()
 			jobCtx.reorgTimeoutOccurred = true
+			logutil.DDLLogger().Info("runReorgJob updateProcessTicker",
+				zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+				zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+				zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+			)
 			return dbterror.ErrWaitReorgTimeout
 		}
 	}
