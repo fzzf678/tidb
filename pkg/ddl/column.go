@@ -533,6 +533,9 @@ func (w *worker) updateCurrentElement(
 		failpoint.Return(dbterror.ErrCancelledDDLJob)
 	})
 	// TODO: Support partition tables.
+	logutil.DDLLogger().Info("updateCurrentElement",
+		zap.String("reorgMeta add", fmt.Sprintf("%p", reorgInfo.ReorgMeta)),
+	)
 	if bytes.Equal(reorgInfo.currElement.TypeKey, meta.ColumnElementKey) {
 		//nolint:forcetypeassert
 		err := w.updatePhysicalTableRow(ctx, t.(table.PhysicalTable), reorgInfo)

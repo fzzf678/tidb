@@ -357,6 +357,9 @@ func (w *worker) runReorgJob(
 		}
 	}
 
+	logutil.DDLLogger().Info("runReorgJob_1",
+		zap.String("reorgMeta add", fmt.Sprintf("%p", reorgInfo.ReorgMeta)),
+	)
 	rc := w.getReorgCtx(job.ID)
 	if rc == nil {
 		// This job is cancelling, we should return ErrCancelledDDLJob directly.
@@ -425,7 +428,9 @@ func (w *worker) runReorgJob(
 
 			// Update a job's warnings.
 			w.mergeWarningsIntoJob(job)
-
+			logutil.DDLLogger().Info("runReorgJob_updateProcessTicker",
+				zap.String("reorgMeta add", fmt.Sprintf("%p", reorgInfo.ReorgMeta)),
+			)
 			rc.resetWarnings()
 		}
 	}
