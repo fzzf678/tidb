@@ -610,7 +610,9 @@ func (w *worker) transitOneJobStep(
 		return 0, w.handleJobDone(jobCtx, job)
 	}
 	failpoint.InjectCall("onJobRunBefore", job)
-
+	logutil.DDLLogger().Info("transitOneJobStep",
+		zap.String("reorgMeta add", fmt.Sprintf("%p", job.ReorgMeta)),
+	)
 	// If running job meets error, we will save this error in job Error and retry
 	// later if the job is not cancelled.
 	schemaVer, updateRawArgs, runJobErr := w.runOneJobStep(jobCtx, job)

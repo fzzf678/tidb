@@ -582,7 +582,9 @@ func (s *jobScheduler) transitOneJobStepAndWaitSync(wk *worker, jobCtx *jobConte
 		}
 		jobCtx.setAlreadyRunOnce(job.ID)
 	}
-
+	logutil.DDLLogger().Info("transitOneJobStepAndWaitSync",
+		zap.String("reorgMeta add", fmt.Sprintf("%p", job.ReorgMeta)),
+	)
 	schemaVer, err := wk.transitOneJobStep(jobCtx, jobW, s.sysTblMgr)
 	if err != nil {
 		jobCtx.logger.Info("handle ddl job failed", zap.Error(err), zap.Stringer("job", job))
