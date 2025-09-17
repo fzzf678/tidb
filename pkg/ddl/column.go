@@ -515,6 +515,7 @@ func (w *worker) updatePhysicalTableRow(
 			zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 			zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 			zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+			zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 		)
 		return w.writePhysicalTableRecord(ctx, w.sessPool, tbl, typeUpdateColumnWorker, reorgInfo)
 	}
@@ -541,6 +542,7 @@ func (w *worker) updateCurrentElement(
 		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+		zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 	)
 	if bytes.Equal(reorgInfo.currElement.TypeKey, meta.ColumnElementKey) {
 		//nolint:forcetypeassert
@@ -554,6 +556,7 @@ func (w *worker) updateCurrentElement(
 		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+		zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 	)
 	if _, ok := t.(table.PartitionedTable); ok {
 		// TODO: remove when modify column of partitioned table is supported

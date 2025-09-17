@@ -969,6 +969,7 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+		zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 	)
 	startKey, endKey := reorgInfo.StartKey, reorgInfo.EndKey
 
@@ -1096,6 +1097,7 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+		zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 	)
 	// update the worker cnt goroutine
 	go func() {
@@ -1110,6 +1112,7 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 					zap.Int64("job concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 					zap.Int64("job batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 					zap.Int64("job max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+					zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 				)
 				currentWorkerCnt := scheduler.currentWorkerSize()
 				targetWorkerCnt := reorgInfo.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter()))

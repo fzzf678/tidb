@@ -180,6 +180,7 @@ func (w *worker) onModifyColumn(jobCtx *jobContext, job *model.Job) (ver int64, 
 		zap.Int64("job concurrency", job.ReorgMeta.Concurrency.Load()),
 		zap.Int64("job batch size", job.ReorgMeta.BatchSize.Load()),
 		zap.Int64("job max write speed", job.ReorgMeta.MaxWriteSpeed.Load()),
+		zap.String("reorgInfo address", fmt.Sprintf("address %p %p", job.ReorgMeta, &job.ReorgMeta)),
 	)
 	return w.doModifyColumnTypeWithData(
 		jobCtx, job, dbInfo, tblInfo, changingCol, oldCol, args)
@@ -564,6 +565,7 @@ func (w *worker) doModifyColumnTypeWithData(
 				zap.Int64("job concurrency", job.ReorgMeta.Concurrency.Load()),
 				zap.Int64("job batch size", job.ReorgMeta.BatchSize.Load()),
 				zap.Int64("job max write speed", job.ReorgMeta.MaxWriteSpeed.Load()),
+				zap.String("reorgInfo address", fmt.Sprintf("address %p %p", job.ReorgMeta, &job.ReorgMeta)),
 			)
 			done, ver, err = doReorgWorkForModifyColumn(w, jobCtx, job, tbl, oldCol, changingCol, changingIdxs)
 		}
@@ -646,6 +648,7 @@ func doReorgWorkForModifyColumn(w *worker, jobCtx *jobContext, job *model.Job, t
 		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+		zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 	)
 
 	// Inject a failpoint so that we can pause here and do verification on other components.

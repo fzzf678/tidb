@@ -362,6 +362,7 @@ func (w *worker) runReorgJob(
 		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+		zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 	)
 	rc := w.getReorgCtx(job.ID)
 	if rc == nil {
@@ -384,6 +385,7 @@ func (w *worker) runReorgJob(
 			zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 			zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 			zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+			zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 		)
 		w.wg.Run(func() {
 			err := reorgFn()
@@ -450,6 +452,7 @@ func (w *worker) runReorgJob(
 				zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
 				zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
 				zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+				zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 			)
 			return dbterror.ErrWaitReorgTimeout
 		}
