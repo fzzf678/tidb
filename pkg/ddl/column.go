@@ -537,6 +537,11 @@ func (w *worker) updateCurrentElement(
 		failpoint.Return(dbterror.ErrCancelledDDLJob)
 	})
 	// TODO: Support partition tables.
+	logutil.DDLLogger().Info("updateCurrentElement",
+		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+	)
 	if bytes.Equal(reorgInfo.currElement.TypeKey, meta.ColumnElementKey) {
 		//nolint:forcetypeassert
 		err := w.updatePhysicalTableRow(ctx, t.(table.PhysicalTable), reorgInfo)
@@ -545,6 +550,11 @@ func (w *worker) updateCurrentElement(
 		}
 	}
 
+	logutil.DDLLogger().Info("updateCurrentElement l",
+		zap.Int64("reorgInfo concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+		zap.Int64("reorgInfo batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+		zap.Int64("reorgInfo max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+	)
 	if _, ok := t.(table.PartitionedTable); ok {
 		// TODO: remove when modify column of partitioned table is supported
 		// https://github.com/pingcap/tidb/issues/38297
