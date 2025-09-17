@@ -1106,6 +1106,11 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				logutil.DDLLogger().Info("update worker cnt go routine",
+					zap.Int64("job concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+					zap.Int64("job batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+					zap.Int64("job max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+				)
 				currentWorkerCnt := scheduler.currentWorkerSize()
 				targetWorkerCnt := reorgInfo.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter()))
 				if currentWorkerCnt != targetWorkerCnt {
@@ -1117,13 +1122,6 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 						logutil.DDLLogger().Info("adjust ddl job config success",
 							zap.Int("current worker count", scheduler.currentWorkerSize()))
 					}
-				} else {
-					logutil.DDLLogger().Info("currentWorkerCnt = targetWorkerCnt",
-						zap.Int("currentWorkerCnt", currentWorkerCnt),
-						zap.Int64("job concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
-						zap.Int64("job batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
-						zap.Int64("job max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
-					)
 				}
 			}
 		}
