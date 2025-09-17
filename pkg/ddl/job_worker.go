@@ -870,7 +870,7 @@ func (w *worker) runOneJobStep(
 			w.wg.Run(func() {
 				ticker := time.NewTicker(2 * time.Second)
 				defer ticker.Stop()
-
+				defer logutil.DDLLogger().Info("stopPollDDLJob")
 				for {
 					select {
 					case <-stopCheckingJobCancelled:
