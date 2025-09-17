@@ -1081,6 +1081,12 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				logutil.DDLLogger().Info("update job reorg meta",
+					zap.Int64("job concurrency", reorgInfo.ReorgMeta.Concurrency.Load()),
+					zap.Int64("job batch size", reorgInfo.ReorgMeta.BatchSize.Load()),
+					zap.Int64("job max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
+					zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
+				)
 				currentWorkerCnt := scheduler.currentWorkerSize()
 				targetWorkerCnt := reorgInfo.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter()))
 				if currentWorkerCnt != targetWorkerCnt {
