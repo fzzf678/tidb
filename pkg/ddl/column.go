@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/pingcap/tidb/pkg/util/intest"
 	"math/bits"
 	"strings"
 	"sync/atomic"
@@ -889,6 +890,9 @@ func (w *updateColumnWorker) BackfillData(handleRange reorgBackfillTask) (taskCt
 
 		return nil
 	})
+	if intest.InTest {
+		time.Sleep(time.Second * 5)
+	}
 	logSlowOperations(time.Since(oprStartTime), "BackfillData", 3000)
 
 	return

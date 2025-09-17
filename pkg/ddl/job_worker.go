@@ -535,6 +535,10 @@ func (w *worker) transitOneJobStep(
 ) (int64, error) {
 	failpoint.InjectCall("beforeTransitOneJobStep", jobW)
 	job := jobW.Job
+	logutil.DDLLogger().Info("transitOneJobStep",
+		zap.Int64("job ID", job.ID),
+		zap.String("job address", fmt.Sprintf("%p", job)),
+	)
 	txn, err := w.prepareTxn(job)
 	if err != nil {
 		return 0, err
@@ -880,6 +884,7 @@ func (w *worker) runOneJobStep(
 						case model.JobStateRunning:
 							if latestJob.IsAlterable() {
 								logutil.DDLLogger().Info("update job reorg meta",
+									zap.Int64("job ID", job.ID),
 									zap.Int64("job concurrency", job.ReorgMeta.Concurrency.Load()),
 									zap.Int64("job batch size", job.ReorgMeta.BatchSize.Load()),
 									zap.Int64("job max write speed", job.ReorgMeta.MaxWriteSpeed.Load()),

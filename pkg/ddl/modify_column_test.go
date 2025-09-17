@@ -549,3 +549,33 @@ func TestModifyColumnTypeWhenInterception(t *testing.T) {
 	tk.MustExec("alter table t modify column b decimal(3,1)")
 	tk.MustQuery("show warnings").Check(testkit.Rows("Warning 1292 4096 warnings with this error code, first warning: Truncated incorrect DECIMAL value: '11.22'"))
 }
+
+func TestAdminAlterDDLJob(t *testing.T) {
+	store := testkit.CreateMockStore(t)
+	tk1 := testkit.NewTestKit(t, store)
+	tk1.MustExec("use test")
+	tk1.MustExec("create table t (a int);")
+	tk1.MustExec("insert into t values (1);")
+	tk2 := testkit.NewTestKit(t, store)
+	wg := sync.WaitGroup{}
+	go func() {
+		wg.Add(1)
+		defer wg.Done()
+		tk1.MustExec("alter table t modify a varchar(30);")
+	}()
+	time.Sleep(1 * time.Second)
+	jobID := 0
+	for {
+		r := tk2.MustQuery("admin show ddl jobs where job_type='modify column'")
+		if len(r.Rows()) != 0 {
+			j, err := strconv.ParseInt(r.Rows()[0][0].(string), 10, 64)
+			require.NoError(t, err)
+			jobID = int(j)
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.Greater(t, jobID, 0)
+	tk2.MustExec(fmt.Sprintf("admin alter ddl jobs %d thread = 7", jobID))
+	wg.Wait()
+}

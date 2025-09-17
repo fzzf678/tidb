@@ -559,6 +559,13 @@ func (s *jobScheduler) transitOneJobStepAndWaitSync(wk *worker, jobCtx *jobConte
 	// if owner changed, we need to try sync it if the job is not started by
 	// current owner.
 	job := jobW.Job
+	if job.Type == model.ActionModifyColumn {
+		logutil.DDLLogger().Info("transitOneJobStepAndWaitSync",
+			zap.String("job add", fmt.Sprintf("%p", job)),
+			zap.String("reorgMeta add", fmt.Sprintf("%p", job.ReorgMeta)),
+			zap.Int64("job ID", job.ID),
+		)
+	}
 	if jobCtx.isUnSynced(job.ID) || (job.Started() && !jobCtx.maybeAlreadyRunOnce(job.ID)) {
 		if variable.EnableMDL.Load() {
 			version, err := s.sysTblMgr.GetMDLVer(s.schCtx, job.ID)
