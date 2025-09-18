@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/pingcap/tidb/pkg/util/intest"
 	"math/bits"
 	"strings"
 	"sync/atomic"
@@ -909,6 +910,17 @@ func (w *updateColumnWorker) BackfillData(handleRange reorgBackfillTask) (taskCt
 	})
 	logSlowOperations(time.Since(oprStartTime), "BackfillData", 3000)
 
+	if intest.InTest {
+		for {
+			stop := true
+			failpoint.Inject("mockStuckBackfillData", func(val failpoint.Value) {
+				stop = val.(bool)
+			})
+			if stop {
+				break
+			}
+		}
+	}
 	return
 }
 

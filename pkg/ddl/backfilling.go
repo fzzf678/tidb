@@ -1114,8 +1114,11 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 					zap.Int64("job max write speed", reorgInfo.ReorgMeta.MaxWriteSpeed.Load()),
 					zap.String("reorgInfo address", fmt.Sprintf("address %p %p", reorgInfo.ReorgMeta, &reorgInfo.ReorgMeta)),
 				)
+
 				currentWorkerCnt := scheduler.currentWorkerSize()
 				targetWorkerCnt := reorgInfo.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter()))
+				latestJob, _ := reorgInfo.jobCtx.sysTblMgr.GetJobByID(ctx, reorgInfo.ID)
+				targetWorkerCnt = latestJob.ReorgMeta.GetConcurrencyOrDefault(int(variable.GetDDLReorgWorkerCounter()))
 				if currentWorkerCnt != targetWorkerCnt {
 					err := scheduler.adjustWorkerSize()
 					if err != nil {
@@ -1126,6 +1129,7 @@ func (dc *ddlCtx) writePhysicalTableRecord(
 							zap.Int("current worker count", scheduler.currentWorkerSize()))
 					}
 				}
+				failpoint.InjectCall("checkReorgWorkerCnt", targetWorkerCnt)
 			}
 		}
 	}()
