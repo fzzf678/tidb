@@ -50,6 +50,9 @@ import (
 // them. SchemaTracker is not thread-safe.
 type SchemaTracker struct {
 	*InfoStore
+	Job        *model.Job
+	OldColInfo *model.ColumnInfo
+	NewColInfo *model.ColumnInfo
 }
 
 var _ ddl.Executor = (*SchemaTracker)(nil)
@@ -734,6 +737,10 @@ func (d *SchemaTracker) handleModifyColumn(
 	tblInfo.MoveColumnInfo(newColInfo.Offset, destOffset)
 
 	newColInfo.State = model.StatePublic
+	// for Check Lossy DDL use
+	d.Job = jobW.Job
+	d.OldColInfo = oldCol
+	d.NewColInfo = newColInfo
 	return nil
 }
 
