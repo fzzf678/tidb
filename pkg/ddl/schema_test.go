@@ -595,7 +595,7 @@ func TestAlterDBReadOnlyBlockByTxn(t *testing.T) {
 	tk1.MustExec("create database test_db")
 	tk1.MustExec("use test_db")
 	tk1.MustExec("create table t (a int)")
-	tk1.MustExec("begin")
+	tk1.MustExec("begin optimistic")
 	tk1.MustExec("select * from t")
 	r := tk1.MustQuery("select @@tidb_current_ts").Rows()
 	txnID, err := strconv.ParseInt(r[0][0].(string), 10, 64)
@@ -628,7 +628,7 @@ func TestAlterDBReadOnlyNotBlockByIrrelevantTxn(t *testing.T) {
 	tk1.MustExec("create database if not exists test")
 	tk1.MustExec("use test_db")
 	tk1.MustExec("create table t (a int)")
-	tk1.MustExec("begin")
+	tk1.MustExec("begin optimistic")
 	tk1.MustExec("select * from t")
 	tk2.MustExec("alter database test read only = 1")
 	tk2.MustQuery("show create database test").Check(testkit.Rows("test CREATE DATABASE `test` /*!40100 DEFAULT CHARACTER SET utf8mb4 */ /* READ ONLY = 1 */"))
@@ -642,7 +642,7 @@ func TestAccessDBInTxnAfterDDLDone(t *testing.T) {
 
 	tk1.MustExec("create database test_db")
 	tk1.MustExec("create table test_db.t(a int)")
-	tk1.MustExec("begin")
+	tk1.MustExec("begin optimistic")
 	tk2.MustExec("alter database test_db read only = 1")
 	tk2.MustQuery("show create database test_db").Check(testkit.Rows("test_db CREATE DATABASE `test_db` /*!40100 DEFAULT CHARACTER SET utf8mb4 */ /* READ ONLY = 1 */"))
 	tk1.MustGetErrMsg("select * from test_db.t", "[domain:8028]public schema test_db read only state has changed")
@@ -657,7 +657,7 @@ func TestReadWriteDDLNotBlockByTxn(t *testing.T) {
 	tk1.MustExec("create database test_db")
 	tk1.MustExec("create table test_db.t(a int)")
 	tk1.MustExec("alter schema test_db read only = 1")
-	tk1.MustExec("begin;use test_db;")
+	tk1.MustExec("begin optimistic;use test_db;")
 	tk1.MustExec("select * from t")
 	tk2.MustExec("alter database test_db read only = 0") // won't be blocked
 	tk2.MustQuery("show create database test").Check(testkit.Rows("test CREATE DATABASE `test` /*!40100 DEFAULT CHARACTER SET utf8mb4 */"))
@@ -672,7 +672,7 @@ func TestReadOnlyInMiddleState(t *testing.T) {
 
 	tk1.MustExec("create database test_db")
 	tk1.MustExec("create table test_db.t(a int)")
-	tk1.MustExec("begin;use test_db;")
+	tk1.MustExec("begin optimistic;use test_db;")
 	tk1.MustExec("select * from t")
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
@@ -712,7 +712,7 @@ func TestKillBlockReadOnlyDDLTxn(t *testing.T) {
 	tk1.MustExec("set global tidb_enable_metadata_lock=1")
 	tk1.MustExec("create table t(a int);")
 	tk1.MustExec("insert into t values(1);")
-	tk1.MustExec("begin")
+	tk1.MustExec("begin optimistic")
 	tk1.MustQuery("select * from t;")
 
 	wg := &sync.WaitGroup{}
