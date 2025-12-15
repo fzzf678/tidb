@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"github.com/pingcap/tidb/pkg/statistics"
 	"os"
 	"slices"
 	"strconv"
@@ -2610,6 +2611,9 @@ func writeChunk(
 	writeStmtBufs *variable.WriteStmtBufs,
 	copChunk *chunk.Chunk,
 	tblInfo *model.TableInfo,
+	statsCollector *IndexStatsBuilder,
+	tz *time.Location,
+	sctx sessionctx.Context,
 ) (rowCnt int, bytes int, err error) {
 	iter := chunk.NewIterator4Chunk(copChunk)
 	c := copCtx.GetBase()
@@ -2646,7 +2650,9 @@ func writeChunk(
 		restoreDataBuf = make([]types.Datum, len(c.HandleOutputOffsets))
 	}
 
+	fms := statistics.NewFMSketch(10000)
 	for row := iter.Begin(); row != iter.End(); row = iter.Next() {
+		fms.InsertValue(sctx.GetSessionVars().StmtCtx, types.NewDatum(row.GetRaw(0)))
 		handleDataBuf := ExtractDatumByOffsets(ectx, row, c.HandleOutputOffsets, c.ExprColumnInfos, handleDataBuf)
 		if restore {
 			// restoreDataBuf should not truncate index values.
@@ -2679,6 +2685,8 @@ func writeChunk(
 			if needRestoreForIndexes[i] {
 				rsData = getRestoreData(c.TableInfo, copCtx.IndexInfo(idxID), c.PrimaryKeyInfo, restoreDataBuf)
 			}
+			statsCollector.sampleIndexVal(idxData[0], tz)
+
 			kvBytes, err := writeOneKV(ctx, writers[i], index, loc, errCtx, writeStmtBufs, idxData, rsData, h)
 			if err != nil {
 				err = ingest.TryConvertToKeyExistsErr(err, index.Meta(), tblInfo)
@@ -2688,6 +2696,8 @@ func writeChunk(
 		}
 		count++
 	}
+	ks, vs := fms.KV()
+	fmt.Println("FMSketch KVs:", ks, vs)
 	return count, totalBytes, nil
 }
 

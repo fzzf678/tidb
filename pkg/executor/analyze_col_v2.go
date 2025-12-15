@@ -17,6 +17,7 @@ package executor
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -322,6 +323,10 @@ func (e *AnalyzeColumnsExecV2) buildSamplingStats(
 					return 0, nil, nil, nil, nil, err
 				}
 			}
+		}
+		for i, c := range rootRowCollector.Base().FMSketches {
+			ks, vs := c.KV()
+			fmt.Println("column index:", i, "fm sketch in rootCollector:", ks, vs)
 		}
 	}
 

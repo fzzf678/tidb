@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/pingcap/tidb/pkg/statistics"
+	"math/rand"
 	"path"
 	"strconv"
 	"sync"
@@ -724,6 +726,17 @@ func NewIndexIngestOperator(
 ) *IndexIngestOperator {
 	writerCfg := getLocalWriterConfig(len(indexes), concurrency)
 
+	// todo: add to external storage operator
+	var colInfo *model.ColumnInfo
+	if len(indexes) == 1 {
+		logutil.BgLogger().Error("build stats only support single index", zap.Int("index count", len(indexes)))
+		for _, col := range tbl.Cols() {
+			if col.Name.L == indexes[0].Meta().Columns[0].Name.L {
+				colInfo = col.ColumnInfo
+				break
+			}
+		}
+	}
 	var writerIDAlloc atomic.Int32
 	pool := workerpool.NewWorkerPool(
 		"indexIngestOperator",
@@ -754,6 +767,15 @@ func NewIndexIngestOperator(
 				srcChunkPool: srcChunkPool,
 				reorgMeta:    reorgMeta,
 				collector:    collector,
+				statsCollector: &IndexStatsBuilder{
+					sampleRate: 0.5,
+					//sampleRate: 11_0000.0 / 6_0000_0000.0,
+					r:           rand.New(rand.NewSource(time.Now().UnixNano())),
+					sampleItems: make([]*statistics.SampleItem, 0, 20000),
+					colInfo:     colInfo.Clone(),
+					colSize:     getTypeByteSize(colInfo.FieldType),
+					fmSketch:    statistics.NewFMSketch(statistics.MaxSketchSize),
+				},
 			}
 			err := w.initIndexConditionCheckers()
 			if err != nil {
@@ -784,8 +806,13 @@ type indexIngestWorker struct {
 	writers      []ingest.Writer
 	srcChunkPool *sync.Pool
 	// only available in global sort
-	totalCount *atomic.Int64
-	collector  execute.Collector
+	totalCount     *atomic.Int64
+	collector      execute.Collector
+	statsCollector *IndexStatsBuilder
+}
+
+func (w *indexIngestWorker) buildStats() {
+	w.statsCollector.buildStats()
 }
 
 func (w *indexIngestWorker) HandleTask(ck IndexRecordChunk, send func(IndexWriteResult)) error {
@@ -831,6 +858,15 @@ func (w *indexIngestWorker) initSessCtx() error {
 			return err
 		}
 		w.se = session.NewSession(sessCtx)
+
+		sessCtx1, err1 := w.sessPool.Get()
+		if err1 != nil {
+			return err1
+		}
+		sessCtx1.GetSessionVars().TimeZone = time.UTC
+		sessCtx1.GetSessionVars().StmtCtx.SetTimeZone(time.UTC)
+		w.statsCollector.scCtx = sessCtx1
+		//w.statsCollector.scCtx = w.se.Context
 	}
 
 	return nil
@@ -868,10 +904,13 @@ func (w *indexIngestWorker) Close() error {
 		if err := ew.Close(w.ctx); err != nil {
 			gerr = ingest.TryConvertToKeyExistsErr(err, w.indexes[i].Meta(), w.tbl.Meta())
 		}
+		// get field type by column name
+		w.buildStats()
 	}
 	if w.se != nil {
 		w.restore(w.se.Context)
 		w.sessPool.Put(w.se.Context)
+		w.sessPool.Put(w.statsCollector.scCtx)
 	}
 
 	return gerr
@@ -894,7 +933,8 @@ func (w *indexIngestWorker) WriteChunk(rs *IndexRecordChunk) (count int, bytes i
 		// skip running the checker in TiDB side.
 		indexConditionCheckers = nil
 	}
-	cnt, kvBytes, err := writeChunk(w.ctx, w.writers, w.indexes, indexConditionCheckers, w.copCtx, sc.TimeZone(), sc.ErrCtx(), vars.GetWriteStmtBufs(), rs.Chunk, w.tbl.Meta())
+	cnt, kvBytes, err := writeChunk(w.ctx, w.writers, w.indexes, indexConditionCheckers, w.copCtx, sc.TimeZone(), sc.ErrCtx(),
+		vars.GetWriteStmtBufs(), rs.Chunk, w.tbl.Meta(), w.statsCollector, w.se.GetSessionVars().TimeZone, w.se.Session())
 	if err != nil || cnt == 0 {
 		return 0, 0, err
 	}

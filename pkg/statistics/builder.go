@@ -17,6 +17,7 @@ package statistics
 import (
 	"bytes"
 	"cmp"
+	"fmt"
 	"math"
 	"sort"
 
@@ -399,6 +400,11 @@ func BuildHistAndTopN(
 	count := collector.Count
 	ndv := collector.FMSketch.NDV()
 	nullCount := collector.NullCount
+	ks, vs := collector.FMSketch.KV()
+	if !isColumn {
+		fmt.Println("fm sketch hashset:", ks, vs)
+		// 13834778063021667559 15195375777814662037 14987360377986231656 17746585004847908418
+	}
 	if ndv > count {
 		ndv = count
 	}

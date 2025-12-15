@@ -81,6 +81,17 @@ func NewFMSketch(maxSize int) *FMSketch {
 	return result
 }
 
+func (s *FMSketch) KV() ([]uint64, []bool) {
+	var keys []uint64
+	var values []bool
+	s.hashset.Iter(func(k uint64, v bool) (stop bool) {
+		keys = append(keys, k)
+		values = append(values, v)
+		return false
+	})
+	return keys, values
+}
+
 // Copy makes a copy for current FMSketch.
 func (s *FMSketch) Copy() *FMSketch {
 	if s == nil {
@@ -136,6 +147,24 @@ func (s *FMSketch) insertHashValue(hashVal uint64) {
 // InsertValue inserts a value into the FM sketch.
 func (s *FMSketch) InsertValue(sc *stmtctx.StatementContext, value types.Datum) error {
 	bytes, err := codec.EncodeValue(sc.TimeZone(), nil, value)
+	err = sc.HandleError(err)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	hashFunc := murmur3Pool.Get().(hash.Hash64)
+	hashFunc.Reset()
+	defer murmur3Pool.Put(hashFunc)
+	_, err = hashFunc.Write(bytes)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	s.insertHashValue(hashFunc.Sum64())
+	return nil
+}
+
+// InsertIndexVal inserts an index value into the FM sketch.
+func (s *FMSketch) InsertIndexVal(sc *stmtctx.StatementContext, value types.Datum) error {
+	bytes, err := codec.EncodeKey(sc.TimeZone(), nil, value)
 	err = sc.HandleError(err)
 	if err != nil {
 		return errors.Trace(err)
