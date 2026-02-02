@@ -181,7 +181,7 @@ type ExecutorForTest interface {
 	DoDDLJobWrapper(ctx sessionctx.Context, jobW *JobWrapper) error
 }
 
-// all fields are shared with ddl now.
+// All fields are shared with ddl now.
 type executor struct {
 	sessPool    *sess.Pool
 	statsHandle *handle.Handle
