@@ -85,6 +85,12 @@ const (
 	Least    = "least"
 	Interval = "interval"
 
+	// masking functions
+	MaskFull    = "mask_full"
+	MaskPartial = "mask_partial"
+	MaskNull    = "mask_null"
+	MaskDate    = "mask_date"
+
 	// math functions
 	Abs      = "abs"
 	Acos     = "acos"
@@ -293,6 +299,10 @@ const (
 	ReleaseAllLocks = "release_all_locks"
 	Sleep           = "sleep"
 	UUID            = "uuid"
+	UUIDv4          = "uuid_v4"
+	UUIDv7          = "uuid_v7"
+	UUIDVersion     = "uuid_version"
+	UUIDTimestamp   = "uuid_timestamp"
 	UUIDShort       = "uuid_short"
 	UUIDToBin       = "uuid_to_bin"
 	BinToUUID       = "bin_to_uuid"
@@ -362,7 +372,8 @@ const (
 	VecAsText               = "vec_as_text"
 
 	// FTS functions (tidb extension)
-	FTSMatchWord = "fts_match_word"
+	FTSMatchWord         = "fts_match_word"
+	FTSMysqlMatchAgainst = "match_against"
 
 	// TiDB internal function.
 	TiDBDecodeKey       = "tidb_decode_key"
@@ -882,7 +893,11 @@ func (n *AggregateFuncExpr) Restore(ctx *format.RestoreCtx) error {
 			}
 		}
 		ctx.WriteKeyWord(" SEPARATOR ")
-		if err := n.Args[len(n.Args)-1].Restore(ctx); err != nil {
+		// The parser grammar only accepts `SEPARATOR stringLit` without charset introducer.
+		// Keep the literal text restorable even when separator carries charset/collation metadata.
+		separatorCtx := *ctx
+		separatorCtx.Flags |= format.RestoreStringWithoutCharset
+		if err := n.Args[len(n.Args)-1].Restore(&separatorCtx); err != nil {
 			return errors.Annotate(err, "An error occurred while restore AggregateFuncExpr.Args SEPARATOR")
 		}
 	default:

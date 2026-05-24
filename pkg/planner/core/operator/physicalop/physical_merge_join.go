@@ -28,10 +28,10 @@ import (
 	"github.com/pingcap/tidb/pkg/planner/property"
 	"github.com/pingcap/tidb/pkg/planner/util"
 	"github.com/pingcap/tidb/pkg/planner/util/costusage"
-	"github.com/pingcap/tidb/pkg/planner/util/optimizetrace"
 	"github.com/pingcap/tidb/pkg/planner/util/utilfuncp"
 	"github.com/pingcap/tidb/pkg/types"
 	h "github.com/pingcap/tidb/pkg/util/hint"
+	"github.com/pingcap/tidb/pkg/util/intset"
 	"github.com/pingcap/tidb/pkg/util/plancodec"
 	"github.com/pingcap/tidb/pkg/util/set"
 	"github.com/pingcap/tidb/pkg/util/size"
@@ -51,6 +51,7 @@ func GetMergeJoin(p *logicalop.LogicalJoin, prop *property.PhysicalProperty, sch
 	joins := make([]base.PhysicalPlan, 0, len(p.LeftProperties)+1)
 	// The LeftProperties caches all the possible properties that are provided by its children.
 	leftJoinKeys, rightJoinKeys, isNullEQ, hasNullEQ := p.GetJoinKeys()
+	constantCols := p.ExtractFD().ConstantCols()
 
 	// EnumType/SetType Unsupported: merge join conflicts with index order.
 	// ref: https://github.com/pingcap/tidb/issues/24473, https://github.com/pingcap/tidb/issues/25669
@@ -111,12 +112,11 @@ func GetMergeJoin(p *logicalop.LogicalJoin, prop *property.PhysicalProperty, sch
 		mergeJoin.SetSchema(schema)
 		mergeJoin.OtherConditions = moveEqualToOtherConditions(p, offsets)
 		mergeJoin.initCompareFuncs()
-		if reqProps, ok := mergeJoin.tryToGetChildReqProp(prop); ok {
+		if reqProps, ok := mergeJoin.tryToGetChildReqProp(prop, constantCols); ok {
 			// Adjust expected count for children nodes.
 			if prop.ExpectedCnt < statsInfo.RowCount {
-				expCntScale := prop.ExpectedCnt / statsInfo.RowCount
-				reqProps[0].ExpectedCnt = leftStatsInfo.RowCount * expCntScale
-				reqProps[1].ExpectedCnt = rightStatsInfo.RowCount * expCntScale
+				reqProps[0].ExpectedCnt = CalcChildExpectedCnt(p.SCtx(), prop, leftStatsInfo.RowCount, statsInfo.RowCount)
+				reqProps[1].ExpectedCnt = CalcChildExpectedCnt(p.SCtx(), prop, rightStatsInfo.RowCount, statsInfo.RowCount)
 			}
 			mergeJoin.SetChildrenReqProps(reqProps)
 			_, desc := prop.AllSameOrder()
@@ -184,10 +184,10 @@ func getEnforcedMergeJoin(p *logicalop.LogicalJoin, prop *property.PhysicalPrope
 			return nil
 		}
 		// If the output wants the order of the inner side. We should reject it since we might add null-extend rows of that side.
-		if p.JoinType == logicalop.LeftOuterJoin && hasRightColInProp {
+		if p.JoinType == base.LeftOuterJoin && hasRightColInProp {
 			return nil
 		}
-		if p.JoinType == logicalop.RightOuterJoin && hasLeftColInProp {
+		if p.JoinType == base.RightOuterJoin && hasLeftColInProp {
 			return nil
 		}
 	}
@@ -232,7 +232,7 @@ func ShouldSkipHashJoin(p *logicalop.LogicalJoin) bool {
 }
 
 // BuildMergeJoinPlan builds a PhysicalMergeJoin from the given fields. Currently, it is only used for test purpose.
-func BuildMergeJoinPlan(ctx base.PlanContext, joinType logicalop.JoinType, leftKeys, rightKeys []*expression.Column) *PhysicalMergeJoin {
+func BuildMergeJoinPlan(ctx base.PlanContext, joinType base.JoinType, leftKeys, rightKeys []*expression.Column) *PhysicalMergeJoin {
 	baseJoin := BasePhysicalJoin{
 		JoinType:      joinType,
 		DefaultValues: []types.Datum{types.NewDatum(1), types.NewDatum(1)},
@@ -263,18 +263,6 @@ func (p *PhysicalMergeJoin) Clone(newCtx base.PlanContext) (base.PhysicalPlan, e
 	return cloned, nil
 }
 
-// CloneForPlanCache implements the base.Plan interface.
-func (p *PhysicalMergeJoin) CloneForPlanCache(newCtx base.PlanContext) (base.Plan, bool) {
-	cloned := new(PhysicalMergeJoin)
-	*cloned = *p
-	basePlan, baseOK := p.BasePhysicalJoin.CloneForPlanCacheWithSelf(newCtx, cloned)
-	if !baseOK {
-		return nil, false
-	}
-	cloned.BasePhysicalJoin = *basePlan
-	return cloned, true
-}
-
 // Attach2Task implements PhysicalPlan interface.
 func (p *PhysicalMergeJoin) Attach2Task(tasks ...base.Task) base.Task {
 	return utilfuncp.Attach2Task4PhysicalMergeJoin(p, tasks...)
@@ -286,13 +274,13 @@ func (p *PhysicalMergeJoin) GetCost(lCnt, rCnt float64, costFlag uint64) float64
 }
 
 // GetPlanCostVer1 calculates the cost of the plan if it has not been calculated yet and returns the cost.
-func (p *PhysicalMergeJoin) GetPlanCostVer1(taskType property.TaskType, option *optimizetrace.PlanCostOption) (float64, error) {
+func (p *PhysicalMergeJoin) GetPlanCostVer1(taskType property.TaskType, option *costusage.PlanCostOption) (float64, error) {
 	return utilfuncp.GetPlanCostVer14PhysicalMergeJoin(p, taskType, option)
 }
 
 // GetPlanCostVer2 returns the plan-cost of this sub-plan, which is:
 // plan-cost = left-child-cost + right-child-cost + filter-cost + group-cost
-func (p *PhysicalMergeJoin) GetPlanCostVer2(taskType property.TaskType, option *optimizetrace.PlanCostOption, _ ...bool) (costusage.CostVer2, error) {
+func (p *PhysicalMergeJoin) GetPlanCostVer2(taskType property.TaskType, option *costusage.PlanCostOption, _ ...bool) (costusage.CostVer2, error) {
 	return utilfuncp.GetPlanCostVer24PhysicalMergeJoin(p, taskType, option)
 }
 
@@ -404,7 +392,7 @@ func (p *PhysicalMergeJoin) ResolveIndices() (err error) {
 
 	colsNeedResolving := p.Schema().Len()
 	// The last output column of this two join is the generated column to indicate whether the row is matched or not.
-	if p.JoinType == logicalop.LeftOuterSemiJoin || p.JoinType == logicalop.AntiLeftOuterSemiJoin {
+	if p.JoinType == base.LeftOuterSemiJoin || p.JoinType == base.AntiLeftOuterSemiJoin {
 		colsNeedResolving--
 	}
 	// To avoid that two plan shares the same column slice.
@@ -434,8 +422,9 @@ func (p *PhysicalMergeJoin) ResolveIndices() (err error) {
 	return
 }
 
-// Only if the input required prop is the prefix fo join keys, we can pass through this property.
-func (p *PhysicalMergeJoin) tryToGetChildReqProp(prop *property.PhysicalProperty) ([]*property.PhysicalProperty, bool) {
+// Only if the input required prop is compatible with join-key order, we can pass through this property.
+// Leading join keys fixed to a single value can be skipped when matching the required order.
+func (p *PhysicalMergeJoin) tryToGetChildReqProp(prop *property.PhysicalProperty, constantCols intset.FastIntSet) ([]*property.PhysicalProperty, bool) {
 	all, desc := prop.AllSameOrder()
 	lProp := property.NewPhysicalProperty(property.RootTaskType, p.LeftJoinKeys, desc, math.MaxFloat64, false)
 	rProp := property.NewPhysicalProperty(property.RootTaskType, p.RightJoinKeys, desc, math.MaxFloat64, false)
@@ -448,13 +437,15 @@ func (p *PhysicalMergeJoin) tryToGetChildReqProp(prop *property.PhysicalProperty
 		if !all {
 			return nil, false
 		}
-		if !prop.IsPrefix(lProp) && !prop.IsPrefix(rProp) {
+		matchLeft := isSortPropCompatibleWithJoinKeys(prop.SortItems, p.LeftJoinKeys, constantCols)
+		matchRight := isSortPropCompatibleWithJoinKeys(prop.SortItems, p.RightJoinKeys, constantCols)
+		if !matchLeft && !matchRight {
 			return nil, false
 		}
-		if prop.IsPrefix(rProp) && p.JoinType == logicalop.LeftOuterJoin {
+		if matchRight && p.JoinType == base.LeftOuterJoin {
 			return nil, false
 		}
-		if prop.IsPrefix(lProp) && p.JoinType == logicalop.RightOuterJoin {
+		if matchLeft && p.JoinType == base.RightOuterJoin {
 			return nil, false
 		}
 	}
@@ -543,4 +534,38 @@ func getNewNullEQByOffsets(oldNullEQ []bool, offsets []int) []bool {
 		}
 	}
 	return newNullEQ
+}
+
+// isSortPropCompatibleWithJoinKeys checks whether the required order can be
+// satisfied by the join-key order when some leading join keys are fixed to a
+// single value.
+//
+// Examples:
+//   - join keys: (a, b), constant cols: {a}, required order: (b)
+//     This returns true because rows ordered by (a, b) are also ordered by (b)
+//     once a is fixed by predicates such as `a = 1`.
+//   - join keys: (a, b, c), constant cols: {a}, required order: (c)
+//     This returns false because b is neither part of the required order nor
+//     proven constant, so the scan order on c is not guaranteed.
+func isSortPropCompatibleWithJoinKeys(sortItems []property.SortItem, joinKeys []*expression.Column, constantCols intset.FastIntSet) bool {
+	keyPos := 0
+	for _, item := range sortItems {
+		matched := false
+		for keyPos < len(joinKeys) {
+			if item.Col.EqualColumn(joinKeys[keyPos]) {
+				keyPos++
+				matched = true
+				break
+			}
+			if constantCols.Has(int(joinKeys[keyPos].UniqueID)) {
+				keyPos++
+				continue
+			}
+			return false
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }

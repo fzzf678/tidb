@@ -18,56 +18,69 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/testkit"
 	"github.com/pingcap/tidb/pkg/testkit/testdata"
 	"github.com/pingcap/tidb/pkg/testkit/testfailpoint"
 	"github.com/stretchr/testify/require"
 )
 
-func TestListPartitionPruning(t *testing.T) {
-	testfailpoint.Enable(t, "github.com/pingcap/tidb/pkg/planner/core/forceDynamicPrune", `return(true)`)
-
-	testkit.RunTestUnderCascades(t, func(t *testing.T, testKit *testkit.TestKit, cascades, caller string) {
-		testKit.MustExec("create database list_partition_pruning")
-		testKit.MustExec("use list_partition_pruning")
-		testKit.MustExec("drop table if exists tlist")
-		testKit.MustExec(`create table tlist (a int, b int) partition by list (a) (
+func testListPartitionPruning(t *testing.T, testKit *testkit.TestKit, cascades, caller string) {
+	testKit.MustExec("create database list_partition_pruning")
+	testKit.MustExec("use list_partition_pruning")
+	testKit.MustExec("drop table if exists tlist")
+	testKit.MustExec(`create table tlist (a int, b int) partition by list (a) (
     partition p0 values in (0, 1, 2),
     partition p1 values in (3, 4, 5),
     partition p2 values in (6, 7, 8),
     partition p3 values in (9, 10, 11),
     partition p4 values in (-1))`)
-		testKit.MustExec(`create table tcollist (a int, b int) partition by list columns(a) (
+	testKit.MustExec(`create table tcollist (a int, b int) partition by list columns(a) (
     partition p0 values in (0, 1, 2),
     partition p1 values in (3, 4, 5),
     partition p2 values in (6, 7, 8),
     partition p3 values in (9, 10, 11),
     partition p4 values in (-1))`)
-		testKit.MustExec(`analyze table tlist`)
-		testKit.MustExec(`analyze table tcollist`)
+	testKit.MustExec(`analyze table tlist`)
+	testKit.MustExec(`analyze table tcollist`)
 
-		var input []string
-		var output []struct {
-			SQL         string
-			DynamicPlan []string
-			StaticPlan  []string
-		}
-		integrationPartitionSuiteData := getIntegrationPartitionSuiteData()
-		integrationPartitionSuiteData.LoadTestCases(t, &input, &output, cascades, caller)
-		for i, tt := range input {
-			testdata.OnRecord(func() {
-				output[i].SQL = tt
-				testKit.MustExec("set @@tidb_partition_prune_mode = 'dynamic'")
-				output[i].DynamicPlan = testdata.ConvertRowsToStrings(testKit.MustQuery(tt).Rows())
-				testKit.MustExec("set @@tidb_partition_prune_mode = 'static'")
-				output[i].StaticPlan = testdata.ConvertRowsToStrings(testKit.MustQuery(tt).Rows())
-			})
+	var input []string
+	var output []struct {
+		SQL         string
+		DynamicPlan []string
+		StaticPlan  []string
+	}
+	integrationPartitionSuiteData := getIntegrationPartitionSuiteData()
+	integrationPartitionSuiteData.LoadTestCases(t, &input, &output, cascades, caller)
+	for i, tt := range input {
+		testdata.OnRecord(func() {
+			output[i].SQL = tt
 			testKit.MustExec("set @@tidb_partition_prune_mode = 'dynamic'")
-			testKit.MustQuery(tt).Check(testkit.Rows(output[i].DynamicPlan...))
+			output[i].DynamicPlan = testdata.ConvertRowsToStrings(testKit.MustQuery(tt).Rows())
 			testKit.MustExec("set @@tidb_partition_prune_mode = 'static'")
-			testKit.MustQuery(tt).Check(testkit.Rows(output[i].StaticPlan...))
-		}
-	})
+			output[i].StaticPlan = testdata.ConvertRowsToStrings(testKit.MustQuery(tt).Rows())
+		})
+		testKit.MustExec("set @@tidb_partition_prune_mode = 'dynamic'")
+		testKit.MustQuery(tt).Check(testkit.Rows(output[i].DynamicPlan...))
+		testKit.MustExec("set @@tidb_partition_prune_mode = 'static'")
+		testKit.MustQuery(tt).Check(testkit.Rows(output[i].StaticPlan...))
+	}
+}
+
+func TestListPartitionPruning(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Please run TestListPartitionPruningForNextGen under the next-gen mode")
+	}
+	testfailpoint.Enable(t, "github.com/pingcap/tidb/pkg/planner/core/forceDynamicPrune", `return(true)`)
+	testkit.RunTestUnderCascades(t, testListPartitionPruning)
+}
+
+func TestListPartitionPruningForNextGen(t *testing.T) {
+	if kerneltype.IsClassic() {
+		t.Skip("Please run TestListPartitionPruning under the non next-gen mode")
+	}
+	testfailpoint.Enable(t, "github.com/pingcap/tidb/pkg/planner/core/forceDynamicPrune", `return(true)`)
+	testkit.RunTestUnderCascades(t, testListPartitionPruning)
 }
 
 func TestPartitionTableExplain(t *testing.T) {
@@ -156,14 +169,14 @@ func TestBatchPointGetTablePartition(t *testing.T) {
 			testdata.OnRecord(func() {
 				output[i].SQL = tt
 				testKit.MustExec("set @@tidb_partition_prune_mode = 'dynamic'")
-				output[i].DynamicPlan = testdata.ConvertRowsToStrings(testKit.MustQuery("explain format = 'brief' " + tt).Rows())
+				output[i].DynamicPlan = testdata.ConvertRowsToStrings(testKit.MustQuery("explain format = 'plan_tree' " + tt).Rows())
 				dynamicQuery := testKit.MustQuery(tt)
 				if !strings.Contains(tt, "order by") {
 					dynamicQuery = dynamicQuery.Sort()
 				}
 				dynamicRes := testdata.ConvertRowsToStrings(dynamicQuery.Rows())
 				testKit.MustExec("set @@tidb_partition_prune_mode = 'static'")
-				output[i].StaticPlan = testdata.ConvertRowsToStrings(testKit.MustQuery("explain format = 'brief' " + tt).Rows())
+				output[i].StaticPlan = testdata.ConvertRowsToStrings(testKit.MustQuery("explain format = 'plan_tree' " + tt).Rows())
 				staticQuery := testKit.MustQuery(tt)
 				if !strings.Contains(tt, "order by") {
 					staticQuery = staticQuery.Sort()
@@ -174,14 +187,14 @@ func TestBatchPointGetTablePartition(t *testing.T) {
 			})
 
 			testKit.MustExec("set @@tidb_partition_prune_mode = 'dynamic'")
-			testKit.MustQuery("explain format = 'brief' " + tt).Check(testkit.Rows(output[i].DynamicPlan...))
+			testKit.MustQuery("explain format = 'plan_tree' " + tt).Check(testkit.Rows(output[i].DynamicPlan...))
 			if strings.Contains(tt, "order by") {
 				testKit.MustQuery(tt).Check(testkit.Rows(output[i].Result...))
 			} else {
 				testKit.MustQuery(tt).Sort().Check(testkit.Rows(output[i].Result...))
 			}
 			testKit.MustExec("set @@tidb_partition_prune_mode = 'static'")
-			testKit.MustQuery("explain format = 'brief' " + tt).Check(testkit.Rows(output[i].StaticPlan...))
+			testKit.MustQuery("explain format = 'plan_tree' " + tt).Check(testkit.Rows(output[i].StaticPlan...))
 			if strings.Contains(tt, "order by") {
 				testKit.MustQuery(tt).Check(testkit.Rows(output[i].Result...))
 			} else {
@@ -280,7 +293,7 @@ func TestPartitionPruneWithPredicateSimplification(t *testing.T) {
       PARTITION p2 VALUES LESS THAN ('Q&h髑UDZ娻躸(襲!籂35'),
       PARTITION p3 VALUES LESS THAN ('f獟@'),
       PARTITION p4 VALUES LESS THAN ('~W噽纓'));`)
-		testKit.MustQuery(`explain format='brief' SELECT /*+ set_var(tidb_partition_prune_mode="static") */
+		testKit.MustQuery(`explain format = 'plan_tree' SELECT /*+ set_var(tidb_partition_prune_mode="static") */
     1,
     char(tla842d94a.col_2, tla842d94a.col_2 using utf8mb4) AS col_383,
     tla842d94a.col_2 AS col_384
@@ -290,12 +303,12 @@ AND char(tla842d94a.col_2, tla842d94a.col_2 using utf8mb4) IN ('9eQ)6nzji', 'bF!
 AND NOT (tla842d94a.col_2 <> 3496.9237290113774)
 ORDER BY char(tla842d94a.col_2, tla842d94a.col_2 using utf8mb4), tla842d94a.col_2;
 `).Check(testkit.Rows(
-			`Projection 0.00 root  Column#4, Column#5, test.tla842d94a.col_2`,
-			`└─Sort 0.00 root  Column#6, test.tla842d94a.col_2`,
-			`  └─Projection 0.00 root  Column#4, Column#5, test.tla842d94a.col_2, char_func(cast(test.tla842d94a.col_2, bigint(22) BINARY), cast(test.tla842d94a.col_2, bigint(22) BINARY), utf8mb4)->Column#6`,
-			`    └─Projection 0.00 root  1->Column#4, char_func(cast(test.tla842d94a.col_2, bigint(22) BINARY), cast(test.tla842d94a.col_2, bigint(22) BINARY), utf8mb4)->Column#5, test.tla842d94a.col_2`,
-			`      └─TableDual 0.00 root  rows:0`))
-		testKit.MustQuery(`explain format='brief' SELECT
+			`Projection root  Column, Column, test.tla842d94a.col_2`,
+			`└─Sort root  Column, test.tla842d94a.col_2`,
+			`  └─Projection root  Column, Column, test.tla842d94a.col_2, char_func(cast(test.tla842d94a.col_2, bigint(22) BINARY), cast(test.tla842d94a.col_2, bigint(22) BINARY), utf8mb4)->Column`,
+			`    └─Projection root  1->Column, char_func(cast(test.tla842d94a.col_2, bigint(22) BINARY), cast(test.tla842d94a.col_2, bigint(22) BINARY), utf8mb4)->Column, test.tla842d94a.col_2`,
+			`      └─TableDual root  rows:0`))
+		testKit.MustQuery(`explain format = 'plan_tree' SELECT
     1,
     char(tla842d94a.col_2, tla842d94a.col_2 using utf8mb4) AS col_383,
     tla842d94a.col_2 AS col_384
@@ -305,10 +318,10 @@ AND char(tla842d94a.col_2, tla842d94a.col_2 using utf8mb4) IN ('9eQ)6nzji', 'bF!
 AND NOT (tla842d94a.col_2 <> 3496.9237290113774)
 ORDER BY char(tla842d94a.col_2, tla842d94a.col_2 using utf8mb4), tla842d94a.col_2;
 `).Check(testkit.Rows(
-			`Projection 0.00 root  Column#4, Column#5, test.tla842d94a.col_2`,
-			`└─Sort 0.00 root  Column#6, test.tla842d94a.col_2`,
-			`  └─Projection 0.00 root  Column#4, Column#5, test.tla842d94a.col_2, char_func(cast(test.tla842d94a.col_2, bigint(22) BINARY), cast(test.tla842d94a.col_2, bigint(22) BINARY), utf8mb4)->Column#6`,
-			`    └─Projection 0.00 root  1->Column#4, char_func(cast(test.tla842d94a.col_2, bigint(22) BINARY), cast(test.tla842d94a.col_2, bigint(22) BINARY), utf8mb4)->Column#5, test.tla842d94a.col_2`,
-			`      └─TableDual 0.00 root  rows:0`))
+			`Projection root  Column, Column, test.tla842d94a.col_2`,
+			`└─Sort root  Column, test.tla842d94a.col_2`,
+			`  └─Projection root  Column, Column, test.tla842d94a.col_2, char_func(cast(test.tla842d94a.col_2, bigint(22) BINARY), cast(test.tla842d94a.col_2, bigint(22) BINARY), utf8mb4)->Column`,
+			`    └─Projection root  1->Column, char_func(cast(test.tla842d94a.col_2, bigint(22) BINARY), cast(test.tla842d94a.col_2, bigint(22) BINARY), utf8mb4)->Column, test.tla842d94a.col_2`,
+			`      └─TableDual root  rows:0`))
 	})
 }

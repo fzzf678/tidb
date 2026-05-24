@@ -33,23 +33,22 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	berrors "github.com/pingcap/tidb/br/pkg/errors"
 	"github.com/pingcap/tidb/br/pkg/pdutil"
-	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tidb/br/pkg/utils"
 	"github.com/pingcap/tidb/br/pkg/version"
 	"github.com/pingcap/tidb/br/pkg/version/build"
-	"github.com/pingcap/tidb/lightning/pkg/web"
+	"github.com/pingcap/tidb/lightning/pkg/checkpoints"
+	"github.com/pingcap/tidb/lightning/pkg/errormanager"
+	"github.com/pingcap/tidb/lightning/pkg/progress"
 	tidbconfig "github.com/pingcap/tidb/pkg/config"
-	"github.com/pingcap/tidb/pkg/distsql"
+	"github.com/pingcap/tidb/pkg/ingestor/ingestctrl"
 	"github.com/pingcap/tidb/pkg/keyspace"
 	tidbkv "github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/lightning/backend"
 	"github.com/pingcap/tidb/pkg/lightning/backend/encode"
-	"github.com/pingcap/tidb/pkg/lightning/backend/local"
 	"github.com/pingcap/tidb/pkg/lightning/backend/tidb"
-	"github.com/pingcap/tidb/pkg/lightning/checkpoints"
 	"github.com/pingcap/tidb/pkg/lightning/common"
 	"github.com/pingcap/tidb/pkg/lightning/config"
-	"github.com/pingcap/tidb/pkg/lightning/errormanager"
+	"github.com/pingcap/tidb/pkg/lightning/importdef"
 	"github.com/pingcap/tidb/pkg/lightning/log"
 	"github.com/pingcap/tidb/pkg/lightning/metric"
 	"github.com/pingcap/tidb/pkg/lightning/mydump"
@@ -57,6 +56,7 @@ import (
 	"github.com/pingcap/tidb/pkg/lightning/worker"
 	"github.com/pingcap/tidb/pkg/meta/autoid"
 	"github.com/pingcap/tidb/pkg/meta/model"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tidb/pkg/session"
 	"github.com/pingcap/tidb/pkg/sessionctx/vardef"
 	"github.com/pingcap/tidb/pkg/store/driver"
@@ -199,7 +199,7 @@ type Controller struct {
 	taskCtx       context.Context
 	cfg           *config.Config
 	dbMetas       []*mydump.MDDatabaseMeta
-	dbInfos       map[string]*checkpoints.TidbDBInfo
+	dbInfos       map[string]*importdef.DBInfo
 	tableWorkers  *worker.Pool
 	indexWorkers  *worker.Pool
 	regionWorkers *worker.Pool
@@ -225,7 +225,7 @@ type Controller struct {
 	closedEngineLimit *worker.Pool
 	addIndexLimit     *worker.Pool
 
-	store          storage.ExternalStorage
+	store          storeapi.Storage
 	ownStore       bool
 	metaMgrBuilder metaMgrBuilder
 	errorMgr       *errormanager.ErrorManager
@@ -240,7 +240,7 @@ type Controller struct {
 	preInfoGetter       PreImportInfoGetter
 	precheckItemBuilder *PrecheckItemBuilder
 	encBuilder          encode.EncodingBuilder
-	tikvModeSwitcher    local.TiKVModeSwitcher
+	tikvModeSwitcher    ingestctrl.TiKVModeSwitcher
 
 	keyspaceName      string
 	resourceGroupName string
@@ -267,7 +267,7 @@ type ControllerParam struct {
 	// a pointer to status to report it to caller
 	Status *LightningStatus
 	// storage interface to read the dump data
-	DumpFileStorage storage.ExternalStorage
+	DumpFileStorage storeapi.Storage
 	// true if DumpFileStorage is created by lightning. In some cases where lightning is a library, the framework may pass an DumpFileStorage
 	OwnExtStorage bool
 	// used by lightning server mode to pause tasks
@@ -275,7 +275,7 @@ type ControllerParam struct {
 	// DB is a connection pool to TiDB
 	DB *sql.DB
 	// storage interface to write file checkpoints
-	CheckpointStorage storage.ExternalStorage
+	CheckpointStorage storeapi.Storage
 	// when CheckpointStorage is not nil, save file checkpoint to it with this name
 	CheckpointName string
 	// DupIndicator can expose the duplicate detection result to the caller
@@ -305,14 +305,14 @@ func NewImportControllerWithPauser(
 	ctx context.Context,
 	cfg *config.Config,
 	p *ControllerParam,
-) (*Controller, error) {
+) (_ *Controller, err error) {
 	tls, err := cfg.ToTLS()
 	if err != nil {
 		return nil, err
 	}
 
 	var cpdb checkpoints.DB
-	// if CheckpointStorage is set, we should use given ExternalStorage to create checkpoints.
+	// if CheckpointStorage is set, we should use given Storage to create checkpoints.
 	if p.CheckpointStorage != nil {
 		cpdb, err = checkpoints.NewFileCheckpointsDBWithExstorageFileName(ctx, p.CheckpointStorage.URI(), p.CheckpointStorage, p.CheckpointName)
 		if err != nil {
@@ -350,24 +350,38 @@ func NewImportControllerWithPauser(
 	var backendObj backend.Backend
 	var pdCli pd.Client
 	var pdHTTPCli pdhttp.Client
+	defer func() {
+		if err == nil {
+			return
+		}
+		if backendObj != nil {
+			backendObj.Close()
+		}
+		if pdHTTPCli != nil {
+			pdHTTPCli.Close()
+		}
+		if pdCli != nil {
+			pdCli.Close()
+		}
+	}()
 	switch cfg.TikvImporter.Backend {
 	case config.BackendTiDB:
 		encodingBuilder = tidb.NewEncodingBuilder()
 		backendObj = tidb.NewTiDBBackend(ctx, db, cfg, errorMgr)
 	case config.BackendLocal:
-		var rLimit local.RlimT
-		rLimit, err = local.GetSystemRLimit()
+		var rLimit ingestctrl.RlimT
+		rLimit, err = ingestctrl.GetSystemRLimit()
 		if err != nil {
 			return nil, err
 		}
-		maxOpenFiles := int(rLimit / local.RlimT(cfg.App.TableConcurrency))
+		maxOpenFiles := int(rLimit / ingestctrl.RlimT(cfg.App.TableConcurrency))
 		// check overflow
 		if maxOpenFiles < 0 {
 			maxOpenFiles = math.MaxInt32
 		}
 
 		addrs := strings.Split(cfg.TiDB.PdAddr, ",")
-		pdCli, err = pd.NewClientWithContext(ctx, componentName, addrs, tls.ToPDSecurityOption())
+		pdCli, err = pd.NewClientWithContext(ctx, componentName, addrs, tls.ToPDSecurityOption(), ingestctrl.PDClientOptions()...)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -377,7 +391,7 @@ func NewImportControllerWithPauser(
 			pdhttp.WithTLSConfig(tls.TLSConfig()),
 		).WithBackoffer(retry.InitialBackoffer(time.Second, time.Second, pdutil.PDRequestRetryTime*time.Second))
 
-		if isLocalBackend(cfg) && cfg.Conflict.Strategy != config.NoneOnDup {
+		if cfg.Conflict.Strategy != config.NoneOnDup {
 			if err := tikv.CheckTiKVVersion(ctx, pdHTTPCli, minTiKVVersionForConflictStrategy, maxTiKVVersionForConflictStrategy); err != nil {
 				if !berrors.Is(err, berrors.ErrVersionMismatch) {
 					return nil, common.ErrCheckKVVersion.Wrap(err).GenWithStackByArgs()
@@ -387,9 +401,15 @@ func NewImportControllerWithPauser(
 			}
 		}
 
+		// simple wraps PD client, so no need to close it separately.
+		pdCliForTiKV, err := ingestctrl.NewCodecPDClient(pdCli, p.KeyspaceName)
+		if err != nil {
+			return nil, common.ErrCreatePDClient.Wrap(err).GenWithStackByArgs()
+		}
+
 		initGlobalConfig(tls.ToTiKVSecurityConfig())
 
-		encodingBuilder = local.NewEncodingBuilder(ctx)
+		encodingBuilder = ingestctrl.NewEncodingBuilder(ctx)
 
 		// get resource group name.
 		exec := common.SQLWithRetry{
@@ -407,7 +427,7 @@ func NewImportControllerWithPauser(
 			return nil, errors.Annotatef(err, "get system variable '%s' failed", vardef.TiDBExplicitRequestSourceType)
 		}
 		if taskType == "" {
-			taskType = kvutil.ExplicitTypeLightning
+			taskType = kvutil.ExplicitTypeImport
 		}
 		p.TaskType = taskType
 
@@ -425,8 +445,8 @@ func NewImportControllerWithPauser(
 		if isRaftKV2 {
 			raftKV2SwitchModeDuration = cfg.Cron.SwitchMode.Duration
 		}
-		backendConfig := local.NewBackendConfig(cfg, maxOpenFiles, p.KeyspaceName, p.ResourceGroupName, p.TaskType, raftKV2SwitchModeDuration)
-		backendObj, err = local.NewBackend(ctx, tls, backendConfig, pdCli.GetServiceDiscovery())
+		backendConfig := ingestctrl.NewBackendConfig(cfg, maxOpenFiles, p.KeyspaceName, p.ResourceGroupName, p.TaskType, raftKV2SwitchModeDuration)
+		backendObj, err = ingestctrl.NewBackend(ctx, tls, backendConfig, pdCliForTiKV)
 		if err != nil {
 			return nil, common.NormalizeOrWrapErr(common.ErrUnknown, err)
 		}
@@ -459,7 +479,7 @@ func NewImportControllerWithPauser(
 
 	var wrapper backend.TargetInfoGetter
 	if cfg.TikvImporter.Backend == config.BackendLocal {
-		wrapper = local.NewTargetInfoGetter(tls, db, pdHTTPCli)
+		wrapper = ingestctrl.NewTargetInfoGetter(tls, db, pdHTTPCli)
 	} else {
 		wrapper = tidb.NewTargetInfoGetter(db)
 	}
@@ -524,7 +544,7 @@ func NewImportControllerWithPauser(
 		preInfoGetter:       preInfoGetter,
 		precheckItemBuilder: preCheckBuilder,
 		encBuilder:          encodingBuilder,
-		tikvModeSwitcher:    local.NewTiKVModeSwitcher(tls.TLSConfig(), pdHTTPCli, logutil.Logger(ctx)),
+		tikvModeSwitcher:    ingestctrl.NewTiKVModeSwitcher(tls.TLSConfig(), pdHTTPCli, logutil.Logger(ctx)),
 
 		keyspaceName:      p.KeyspaceName,
 		resourceGroupName: p.ResourceGroupName,
@@ -538,9 +558,24 @@ func NewImportControllerWithPauser(
 func (rc *Controller) Close() {
 	rc.backend.Close()
 	_ = rc.db.Close()
+	if rc.pdHTTPCli != nil {
+		rc.pdHTTPCli.Close()
+	}
 	if rc.pdCli != nil {
 		rc.pdCli.Close()
 	}
+}
+
+// Pause pauses the import process.
+func (rc *Controller) Pause(_ context.Context) error {
+	rc.pauser.Pause()
+	return nil
+}
+
+// Resume resumes the import process.
+func (rc *Controller) Resume(_ context.Context) error {
+	rc.pauser.Resume()
+	return nil
 }
 
 // Run starts the restore task.
@@ -725,7 +760,7 @@ func verifyLocalFile(ctx context.Context, cpdb checkpoints.DB, dir string) error
 	for tableName, engineIDs := range targetTables {
 		for _, engineID := range engineIDs {
 			_, eID := backend.MakeUUID(tableName, int64(engineID))
-			file := local.Engine{UUID: eID}
+			file := ingestctrl.Engine{UUID: eID}
 			err := file.Exist(dir)
 			if err != nil {
 				logutil.Logger(ctx).Error("can't find local file",
@@ -879,7 +914,7 @@ func (rc *Controller) listenCheckpointUpdates(logger log.Logger) {
 				for _, w := range ws {
 					w <- common.NormalizeOrWrapErr(common.ErrUpdateCheckpoint, err)
 				}
-				web.BroadcastCheckpointDiff(cpd)
+				progress.BroadcastCheckpointDiff(cpd)
 			}
 			rc.checkpointsWg.Done()
 		}
@@ -1156,18 +1191,6 @@ func (rc *Controller) buildRunPeriodicActionAndCancelFunc(ctx context.Context, s
 				f(do)
 			}
 		}
-}
-
-func (rc *Controller) buildTablesRanges() []tidbkv.KeyRange {
-	var keyRanges []tidbkv.KeyRange
-	for _, dbInfo := range rc.dbInfos {
-		for _, tableInfo := range dbInfo.Tables {
-			if ranges, err := distsql.BuildTableRanges(tableInfo.Core); err == nil {
-				keyRanges = append(keyRanges, ranges...)
-			}
-		}
-	}
-	return keyRanges
 }
 
 type checksumManagerKeyType struct{}
@@ -1450,7 +1473,7 @@ func (rc *Controller) importTables(ctx context.Context) (finalErr error) {
 		go func() {
 			for task := range taskCh {
 				tableLogTask := task.tr.logger.Begin(zap.InfoLevel, "restore table")
-				web.BroadcastTableCheckpoint(task.tr.tableName, task.cp)
+				progress.BroadcastTableCheckpoint(task.tr.tableName, task.cp)
 
 				needPostProcess, err := task.tr.importTable(ctx, rc, task.cp)
 				if err != nil && !common.IsContextCanceledError(err) {
@@ -1459,7 +1482,7 @@ func (rc *Controller) importTables(ctx context.Context) (finalErr error) {
 
 				err = common.NormalizeOrWrapErr(common.ErrRestoreTable, err, task.tr.tableName)
 				tableLogTask.End(zap.ErrorLevel, err)
-				web.BroadcastError(task.tr.tableName, err)
+				progress.BroadcastError(task.tr.tableName, err)
 				if m, ok := metric.FromContext(ctx); ok {
 					m.RecordTableCount(metric.TableStateCompleted, err)
 				}
@@ -1682,7 +1705,7 @@ func (rc *Controller) enforceDiskQuota(ctx context.Context) {
 		return
 	}
 
-	localBackend := rc.backend.(*local.Backend)
+	localBackend := rc.backend.(*ingestctrl.Backend)
 	go func() {
 		// locker is assigned when we detect the disk quota is exceeded.
 		// before the disk quota is confirmed exceeded, we keep the diskQuotaLock
@@ -1710,7 +1733,7 @@ func (rc *Controller) enforceDiskQuota(ctx context.Context) {
 			}
 
 			quota := int64(rc.cfg.TikvImporter.DiskQuota)
-			largeEngines, inProgressLargeEngines, totalDiskSize, totalMemSize := local.CheckDiskQuota(localBackend, quota)
+			largeEngines, inProgressLargeEngines, totalDiskSize, totalMemSize := ingestctrl.CheckDiskQuota(localBackend, quota)
 			if m, ok := metric.FromContext(ctx); ok {
 				m.LocalStorageUsageBytesGauge.WithLabelValues("disk").Set(float64(totalDiskSize))
 				m.LocalStorageUsageBytesGauge.WithLabelValues("mem").Set(float64(totalMemSize))
@@ -1806,7 +1829,7 @@ func (rc *Controller) cleanCheckpoints(ctx context.Context) error {
 	case config.CheckpointRename:
 		err = rc.checkpointsDB.MoveCheckpoints(ctx, rc.cfg.TaskID)
 	case config.CheckpointRemove:
-		err = rc.checkpointsDB.RemoveCheckpoint(ctx, "all")
+		err = rc.checkpointsDB.RemoveCheckpoint(ctx, common.AllTables)
 	}
 	task.End(zap.ErrorLevel, err)
 	if err != nil {

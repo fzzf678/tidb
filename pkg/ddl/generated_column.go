@@ -163,10 +163,12 @@ func hasDependentByGeneratedColumn(tblInfo *model.TableInfo, colName ast.CIStr) 
 }
 
 func isGeneratedRelatedColumn(tblInfo *model.TableInfo, newCol, col *model.ColumnInfo) error {
-	if newCol.IsGenerated() || col.IsGenerated() {
-		// TODO: Make it compatible with MySQL error.
-		msg := fmt.Sprintf("newCol IsGenerated %v, oldCol IsGenerated %v", newCol.IsGenerated(), col.IsGenerated())
-		return dbterror.ErrUnsupportedModifyColumn.GenWithStackByArgs(msg)
+	// TODO: Make it compatible with MySQL error.
+	if newCol.IsGenerated() {
+		return dbterror.ErrUnsupportedModifyColumn.GenWithStackByArgs("new column is generated")
+	}
+	if col.IsGenerated() {
+		return dbterror.ErrUnsupportedModifyColumn.GenWithStackByArgs("old column is generated")
 	}
 	if ok, dep, _ := hasDependentByGeneratedColumn(tblInfo, col.Name); ok {
 		msg := fmt.Sprintf("oldCol is a dependent column '%s' for generated column", dep)
@@ -387,20 +389,32 @@ func checkIllegalFn4Generated(name string, genType int, expr ast.ExprNode) error
 }
 
 func checkIndexOrStored(tbl table.Table, oldCol, newCol *table.Column) error {
+	isIndexed := false
+	for _, idx := range tbl.Indices() {
+		for _, col := range idx.Meta().Columns {
+			if col.Name.L == oldCol.Name.L || col.Name.L == newCol.Name.L {
+				isIndexed = true
+				break
+			}
+		}
+		if isIndexed {
+			break
+		}
+	}
+
 	if oldCol.GeneratedExprString == newCol.GeneratedExprString {
-		return nil
+		if oldCol.FieldType.Equal(&newCol.FieldType) || !isIndexed {
+			return nil
+		}
+		return dbterror.ErrUnsupportedOnGeneratedColumn.GenWithStack("Unsupported modification for generated columns covered by an index")
 	}
 
 	if newCol.GeneratedStored {
 		return dbterror.ErrUnsupportedOnGeneratedColumn.GenWithStackByArgs("modifying a stored column")
 	}
 
-	for _, idx := range tbl.Indices() {
-		for _, col := range idx.Meta().Columns {
-			if col.Name.L == newCol.Name.L {
-				return dbterror.ErrUnsupportedOnGeneratedColumn.GenWithStackByArgs("modifying an indexed column")
-			}
-		}
+	if isIndexed {
+		return dbterror.ErrUnsupportedOnGeneratedColumn.GenWithStack("Unsupported modification for generated columns covered by an index")
 	}
 	return nil
 }

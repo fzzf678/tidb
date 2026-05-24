@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package bootstraptest_test
+package bootstraptest
 
 import (
 	"context"
@@ -25,18 +25,23 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/tidb/pkg/config/kerneltype"
 	"github.com/pingcap/tidb/pkg/ddl"
 	"github.com/pingcap/tidb/pkg/kv"
 	"github.com/pingcap/tidb/pkg/meta"
 	"github.com/pingcap/tidb/pkg/meta/metadef"
 	"github.com/pingcap/tidb/pkg/meta/model"
+	"github.com/pingcap/tidb/pkg/parser/ast"
 	"github.com/pingcap/tidb/pkg/parser/terror"
 	plannercore "github.com/pingcap/tidb/pkg/planner/core"
 	"github.com/pingcap/tidb/pkg/server/handler"
 	"github.com/pingcap/tidb/pkg/session"
 	"github.com/pingcap/tidb/pkg/session/sessionapi"
 	"github.com/pingcap/tidb/pkg/sessionctx"
+	"github.com/pingcap/tidb/pkg/sessionctx/vardef"
+	"github.com/pingcap/tidb/pkg/store/mockstore"
 	"github.com/pingcap/tidb/pkg/testkit"
+	"github.com/pingcap/tidb/pkg/testkit/testenv"
 	"github.com/pingcap/tidb/pkg/testkit/testfailpoint"
 	"github.com/pingcap/tidb/pkg/util/chunk"
 	"github.com/pingcap/tidb/pkg/util/sqlexec"
@@ -97,6 +102,71 @@ func TestUpgradeVersion83AndVersion84(t *testing.T) {
 	}
 }
 
+// TestMysqlTablesWithoutClusteredPK pins the `mysql` base tables without a clustered
+// PRIMARY KEY. A diff flags a regression or a new table whose PK type was not
+// considered; the list also serves as a reference for future clustered-PK work.
+//
+// The classic and next-gen kernels bootstrap system tables through different paths
+// (DDL statements vs. direct meta KV writes). The next-gen path clusters every table
+// that has a PRIMARY KEY, while the classic path leaves composite and non-integer PKs
+// non-clustered, so the expected set differs by kernel.
+func TestMysqlTablesWithoutClusteredPK(t *testing.T) {
+	store := testkit.CreateMockStore(t)
+	tk := testkit.NewTestKit(t, store)
+
+	expected := []string{
+		"advisory_locks",
+		"bind_info",
+		"columns_priv",
+		"db",
+		"default_roles",
+		"dist_framework_meta",
+		"expr_pushdown_blacklist",
+		"gc_delete_range",
+		"gc_delete_range_done",
+		"global_grants",
+		"global_priv",
+		"global_variables",
+		"opt_rule_blacklist",
+		"password_history",
+		"plan_replayer_status",
+		"plan_replayer_task",
+		"request_unit_by_group",
+		"role_edges",
+		"stats_extended",
+		"stats_feedback",
+		"stats_top_n",
+		"tables_priv",
+		"tidb",
+		"tidb_ddl_reorg",
+		"tidb_kernel_options",
+		"tidb_pitr_id_map",
+		"tidb_runaway_queries",
+		"tidb_ttl_job_history",
+		"tidb_ttl_task",
+		"user",
+	}
+	if kerneltype.IsNextGen() {
+		expected = []string{
+			"bind_info",
+			"expr_pushdown_blacklist",
+			"gc_delete_range",
+			"gc_delete_range_done",
+			"opt_rule_blacklist",
+			"plan_replayer_status",
+			"stats_feedback",
+			"stats_top_n",
+			"tidb_ddl_reorg",
+			"tidb_runaway_queries",
+		}
+	}
+	tk.MustQuery(
+		"SELECT table_name FROM information_schema.tables " +
+			"WHERE table_schema = 'mysql' AND table_type = 'BASE TABLE' " +
+			"AND tidb_pk_type <> 'CLUSTERED' ORDER BY table_name",
+	).Check(testkit.Rows(expected...))
+}
+
 func revertVersionAndVariables(t *testing.T, se sessionapi.Session, ver int) {
 	session.MustExec(t, se, fmt.Sprintf("update mysql.tidb set variable_value='%d' where variable_name='tidb_server_version'", ver))
 	if ver <= 195 {
@@ -112,6 +182,10 @@ func revertVersionAndVariables(t *testing.T, se sessionapi.Session, ver int) {
 }
 
 func TestUpgradeVersion66(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
+
 	ctx := context.Background()
 	store, dom := session.CreateStoreAndBootstrap(t)
 	defer func() { require.NoError(t, store.Close()) }()
@@ -149,6 +223,10 @@ func TestUpgradeVersion66(t *testing.T) {
 }
 
 func TestUpgradeVersion74(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
+
 	ctx := context.Background()
 
 	cases := []struct {
@@ -199,6 +277,9 @@ func TestUpgradeVersion74(t *testing.T) {
 }
 
 func TestUpgradeVersion75(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
 	ctx := context.Background()
 
 	store, dom := session.CreateStoreAndBootstrap(t)
@@ -308,6 +389,10 @@ func TestUpgradeVersionMockLatest(t *testing.T) {
 
 // TestUpgradeVersionWithUpgradeHTTPOp tests SupportUpgradeHTTPOpVer upgrade SupportUpgradeHTTPOpVer++ with HTTP op.
 func TestUpgradeVersionWithUpgradeHTTPOp(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
+
 	mock := true
 	session.WithMockUpgrade = &mock
 	session.MockUpgradeToVerLatestKind = session.MockSimpleUpgradeToVerLatest
@@ -358,6 +443,10 @@ func TestUpgradeVersionWithUpgradeHTTPOp(t *testing.T) {
 
 // TestUpgradeVersionWithoutUpgradeHTTPOp tests SupportUpgradeHTTPOpVer upgrade SupportUpgradeHTTPOpVer++ without HTTP op.
 func TestUpgradeVersionWithoutUpgradeHTTPOp(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
+
 	mock := true
 	session.WithMockUpgrade = &mock
 	session.MockUpgradeToVerLatestKind = session.MockSimpleUpgradeToVerLatest
@@ -694,6 +783,7 @@ func TestUpgradeWithPauseDDL(t *testing.T) {
 	wg := sync.WaitGroup{}
 	execDDL := func(query string) {
 		tk := testkit.NewTestKit(t, store)
+		tk.Session().SetValue(sessionctx.Initing, true)
 		tk.MustExec("use test")
 		_, err := tk.ExecWithContext(context.Background(), query)
 		require.NoError(t, err)
@@ -705,6 +795,12 @@ func TestUpgradeWithPauseDDL(t *testing.T) {
 			defer wg.Done()
 			ch <- struct{}{}
 			tk := testkit.NewTestKit(t, store)
+			// we are running DDL on user table, it's not possible in normal
+			// upgrade process, we only use it to mock that another instance
+			// submits a DDL job on user table.
+			// we have to set sessionctx.Initing to avoid nextgen calculate resource
+			// params for this DDL.
+			tk.Session().SetValue(sessionctx.Initing, true)
 			tk.MustExec("use test")
 			_, err := tk.ExecWithContext(context.Background(), query)
 			if err != nil {
@@ -874,4 +970,520 @@ func TestUpgradeWithCrossJoinDisabled(t *testing.T) {
 		dom.Close()
 		require.NoError(t, store.Close())
 	}()
+}
+
+func TestUpgradeBDRPrimary(t *testing.T) {
+	fromVersion := 244
+	if kerneltype.IsNextGen() {
+		fromVersion = 250
+	}
+	store, dom := session.CreateStoreAndBootstrap(t)
+	defer func() { require.NoError(t, store.Close()) }()
+	seVLow := session.CreateSessionAndSetID(t, store)
+	txn, err := store.Begin()
+	require.NoError(t, err)
+	m := meta.NewMutator(txn)
+	err = m.FinishBootstrap(int64(fromVersion))
+	require.NoError(t, err)
+	err = txn.Commit(context.Background())
+	revertVersionAndVariables(t, seVLow, fromVersion)
+	require.NoError(t, err)
+	session.MustExec(t, seVLow, "ADMIN SET BDR ROLE PRIMARY")
+	store.SetOption(session.StoreBootstrappedKey, nil)
+	ver, err := session.GetBootstrapVersion(seVLow)
+	require.NoError(t, err)
+	require.Equal(t, int64(fromVersion), ver)
+	dom.Close()
+	newVer, err := session.BootstrapSession(store)
+	require.NoError(t, err)
+	ver, err = session.GetBootstrapVersion(seVLow)
+	require.NoError(t, err)
+	require.Equal(t, session.CurrentBootstrapVersion, ver)
+	newVer.Close()
+}
+
+func TestUpgradeBDRSecondary(t *testing.T) {
+	fromVersion := 244
+	if kerneltype.IsNextGen() {
+		fromVersion = 250
+	}
+	store, dom := session.CreateStoreAndBootstrap(t)
+	defer func() { require.NoError(t, store.Close()) }()
+	seV244 := session.CreateSessionAndSetID(t, store)
+	txn, err := store.Begin()
+	require.NoError(t, err)
+	m := meta.NewMutator(txn)
+	err = m.FinishBootstrap(int64(fromVersion))
+	require.NoError(t, err)
+	err = txn.Commit(context.Background())
+	revertVersionAndVariables(t, seV244, fromVersion)
+	require.NoError(t, err)
+	session.MustExec(t, seV244, "ADMIN SET BDR ROLE SECONDARY")
+	store.SetOption(session.StoreBootstrappedKey, nil)
+	ver, err := session.GetBootstrapVersion(seV244)
+	require.NoError(t, err)
+	require.Equal(t, int64(fromVersion), ver)
+	dom.Close()
+	newVer, err := session.BootstrapSession(store)
+	require.NoError(t, err)
+	ver, err = session.GetBootstrapVersion(seV244)
+	require.NoError(t, err)
+	require.Equal(t, session.CurrentBootstrapVersion, ver)
+	newVer.Close()
+}
+
+func TestUpgradeBindInfo(t *testing.T) {
+	fromVersion := 251
+	store, dom := session.CreateStoreAndBootstrap(t)
+	defer func() { require.NoError(t, store.Close()) }()
+	seV251 := session.CreateSessionAndSetID(t, store)
+	txn, err := store.Begin()
+	require.NoError(t, err)
+	m := meta.NewMutator(txn)
+	err = m.FinishBootstrap(int64(fromVersion))
+	require.NoError(t, err)
+	err = txn.Commit(context.Background())
+	revertVersionAndVariables(t, seV251, fromVersion)
+	require.NoError(t, err)
+	session.MustExec(t, seV251, "ADMIN RELOAD BINDINGS;")
+	store.SetOption(session.StoreBootstrappedKey, nil)
+	ver, err := session.GetBootstrapVersion(seV251)
+	require.NoError(t, err)
+	require.Equal(t, int64(fromVersion), ver)
+	dom.Close()
+	newVer, err := session.BootstrapSession(store)
+	require.NoError(t, err)
+	seLatestV := session.CreateSessionAndSetID(t, store)
+	ver, err = session.GetBootstrapVersion(seLatestV)
+	require.NoError(t, err)
+	require.Equal(t, session.CurrentBootstrapVersion, ver)
+	session.MustExec(t, seLatestV, "ADMIN RELOAD BINDINGS;")
+	newVer.Close()
+	seLatestV.Close()
+}
+
+func checkTiDBMaskingPolicyTableSchema(t *testing.T, tk *testkit.TestKit) {
+	tk.MustQuery("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='mysql' AND table_name='tidb_masking_policy'").Check(testkit.Rows("1"))
+	tk.MustQuery(`
+SELECT column_name, LOWER(column_type), is_nullable
+FROM information_schema.columns
+WHERE table_schema='mysql' AND table_name='tidb_masking_policy'
+ORDER BY ordinal_position`).Check(testkit.Rows(
+		"policy_id bigint(20) NO",
+		"schema_name varchar(64) NO",
+		"table_name varchar(64) NO",
+		"table_id bigint(20) NO",
+		"column_id bigint(20) NO",
+		"column_name varchar(64) NO",
+		"policy_name varchar(64) NO",
+		"masking_type varchar(32) NO",
+		"expression text NO",
+		"restrict_on varchar(256) NO",
+		"status enum('enabled','disabled') YES",
+		"created_at timestamp YES",
+		"created_by varchar(128) YES",
+		"updated_by varchar(128) YES",
+		"updated_at timestamp YES",
+	))
+	tk.MustQuery(`
+SELECT index_name, non_unique, seq_in_index, column_name
+FROM information_schema.statistics
+WHERE table_schema='mysql' AND table_name='tidb_masking_policy'
+ORDER BY index_name, seq_in_index`).Check(testkit.Rows(
+		"PRIMARY 0 1 policy_id",
+		"idx_schema_table 1 1 schema_name",
+		"idx_schema_table 1 2 table_name",
+		"uk_table_column 0 1 table_id",
+		"uk_table_column 0 2 column_id",
+		"uk_table_policy 0 1 table_id",
+		"uk_table_policy 0 2 policy_name",
+	))
+}
+
+func TestUpgradeVersion260MaskingPolicy(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
+	const fromVersion = 254
+
+	store, dom := session.CreateStoreAndBootstrap(t)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	seV254 := session.CreateSessionAndSetID(t, store)
+	txn, err := store.Begin()
+	require.NoError(t, err)
+	m := meta.NewMutator(txn)
+	err = m.FinishBootstrap(int64(fromVersion))
+	require.NoError(t, err)
+	err = txn.Commit(context.Background())
+	require.NoError(t, err)
+	revertVersionAndVariables(t, seV254, fromVersion)
+
+	is := dom.InfoSchema()
+	policyTbl, err := is.TableByName(context.Background(), ast.NewCIStr("mysql"), ast.NewCIStr("tidb_masking_policy"))
+	require.NoError(t, err)
+	policyDBID := policyTbl.Meta().DBID
+	policyTblID := policyTbl.Meta().ID
+
+	txn, err = store.Begin()
+	require.NoError(t, err)
+	m = meta.NewMutator(txn)
+	err = m.DropTableOrView(policyDBID, policyTblID)
+	require.NoError(t, err)
+	exists, err := m.CheckTableExists(policyDBID, policyTblID)
+	require.NoError(t, err)
+	require.False(t, exists)
+	err = txn.Commit(context.Background())
+	require.NoError(t, err)
+
+	store.SetOption(session.StoreBootstrappedKey, nil)
+	ver, err := session.GetBootstrapVersion(seV254)
+	require.NoError(t, err)
+	require.Equal(t, int64(fromVersion), ver)
+	dom.Close()
+
+	newVer, err := session.BootstrapSession(store)
+	require.NoError(t, err)
+	defer newVer.Close()
+
+	seLatestV := session.CreateSessionAndSetID(t, store)
+	ver, err = session.GetBootstrapVersion(seLatestV)
+	require.NoError(t, err)
+	require.Equal(t, session.CurrentBootstrapVersion, ver)
+
+	tk := testkit.NewTestKit(t, store)
+	checkTiDBMaskingPolicyTableSchema(t, tk)
+}
+
+func TestUpgradeWithAnalyzeColumnOptions(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
+	ctx := context.Background()
+
+	// Test case 1: Pre-8.3.0 cluster (version 209) upgrading to current
+	// The variable should be set to "ALL" by upgradeToVer210 and remain "ALL"
+	t.Run("Pre-8.3.0 upgrade", func(t *testing.T) {
+		store, dom := session.CreateStoreAndBootstrap(t)
+		defer func() { require.NoError(t, store.Close()) }()
+
+		seV209 := session.CreateSessionAndSetID(t, store)
+		txn, err := store.Begin()
+		require.NoError(t, err)
+		m := meta.NewMutator(txn)
+		err = m.FinishBootstrap(int64(209))
+		require.NoError(t, err)
+		err = txn.Commit(context.Background())
+		require.NoError(t, err)
+		revertVersionAndVariables(t, seV209, 209)
+
+		// Delete the variable to simulate pre-8.3.0 state where it didn't exist
+		session.MustExec(t, seV209, "DELETE FROM mysql.global_variables WHERE variable_name='tidb_analyze_column_options'")
+		session.MustExec(t, seV209, "commit")
+
+		store.SetOption(session.StoreBootstrappedKey, nil)
+		ver, err := session.GetBootstrapVersion(seV209)
+		require.NoError(t, err)
+		require.Equal(t, int64(209), ver)
+		dom.Close()
+
+		domCurrent, err := session.BootstrapSession(store)
+		require.NoError(t, err)
+		defer domCurrent.Close()
+
+		seCurrent := session.CreateSessionAndSetID(t, store)
+		ver, err = session.GetBootstrapVersion(seCurrent)
+		require.NoError(t, err)
+		require.Equal(t, session.CurrentBootstrapVersion, ver)
+
+		// Check that the variable is set to "ALL" (by upgradeToVer210)
+		r := session.MustExecToRecodeSet(t, seCurrent, "SELECT variable_value FROM mysql.global_variables WHERE variable_name='tidb_analyze_column_options'")
+		req := r.NewChunk(nil)
+		require.NoError(t, r.Next(ctx, req))
+		require.Equal(t, 1, req.NumRows())
+		row := req.GetRow(0)
+		require.Equal(t, "ALL", row.GetString(0))
+	})
+
+	// Test case 2: Fresh 8.3.0 cluster (version 210) without explicit setting
+	// After upgrade, should be set to "PREDICATE" to preserve 8.3.0 behavior
+	t.Run("Fresh 8.3.0 upgrade without setting", func(t *testing.T) {
+		store, dom := session.CreateStoreAndBootstrap(t)
+		defer func() { require.NoError(t, store.Close()) }()
+
+		seV210 := session.CreateSessionAndSetID(t, store)
+		txn, err := store.Begin()
+		require.NoError(t, err)
+		m := meta.NewMutator(txn)
+		err = m.FinishBootstrap(int64(210))
+		require.NoError(t, err)
+		err = txn.Commit(context.Background())
+		require.NoError(t, err)
+		revertVersionAndVariables(t, seV210, 210)
+
+		// Set the variable to "PREDICATE" to simulate the default 8.3.0 state
+		// NOTE: When TiDB starts for the first time, it will insert the default value into mysql.global_variables.
+		session.MustExec(t, seV210, "REPLACE INTO mysql.global_variables VALUES ('tidb_analyze_column_options', 'PREDICATE')")
+		session.MustExec(t, seV210, "commit")
+
+		store.SetOption(session.StoreBootstrappedKey, nil)
+		ver, err := session.GetBootstrapVersion(seV210)
+		require.NoError(t, err)
+		require.Equal(t, int64(210), ver)
+		dom.Close()
+
+		domCurrent, err := session.BootstrapSession(store)
+		require.NoError(t, err)
+		defer domCurrent.Close()
+
+		seCurrent := session.CreateSessionAndSetID(t, store)
+		ver, err = session.GetBootstrapVersion(seCurrent)
+		require.NoError(t, err)
+		require.Equal(t, session.CurrentBootstrapVersion, ver)
+
+		// Check that the variable is kept as "PREDICATE" after upgrade
+		r := session.MustExecToRecodeSet(t, seCurrent, "SELECT variable_value FROM mysql.global_variables WHERE variable_name='tidb_analyze_column_options'")
+		req := r.NewChunk(nil)
+		require.NoError(t, r.Next(ctx, req))
+		require.Equal(t, 1, req.NumRows())
+		row := req.GetRow(0)
+		require.Equal(t, "PREDICATE", row.GetString(0))
+	})
+
+	// Test case 3: 8.3.0 cluster with explicit "ALL" setting
+	// The variable exists with value "ALL" (user explicitly set it)
+	// Should remain "ALL" after upgrade
+	t.Run("8.3.0 upgrade with explicit ALL setting", func(t *testing.T) {
+		store, dom := session.CreateStoreAndBootstrap(t)
+		defer func() { require.NoError(t, store.Close()) }()
+
+		seV210 := session.CreateSessionAndSetID(t, store)
+		txn, err := store.Begin()
+		require.NoError(t, err)
+		m := meta.NewMutator(txn)
+		err = m.FinishBootstrap(int64(210))
+		require.NoError(t, err)
+		err = txn.Commit(context.Background())
+		require.NoError(t, err)
+		revertVersionAndVariables(t, seV210, 210)
+
+		// Set the variable to "ALL" to simulate user explicitly setting it
+		session.MustExec(t, seV210, "REPLACE INTO mysql.global_variables VALUES ('tidb_analyze_column_options', 'ALL')")
+		session.MustExec(t, seV210, "commit")
+
+		store.SetOption(session.StoreBootstrappedKey, nil)
+		ver, err := session.GetBootstrapVersion(seV210)
+		require.NoError(t, err)
+		require.Equal(t, int64(210), ver)
+		dom.Close()
+
+		domCurrent, err := session.BootstrapSession(store)
+		require.NoError(t, err)
+		defer domCurrent.Close()
+
+		seCurrent := session.CreateSessionAndSetID(t, store)
+		ver, err = session.GetBootstrapVersion(seCurrent)
+		require.NoError(t, err)
+		require.Equal(t, session.CurrentBootstrapVersion, ver)
+
+		// Check that the variable remains "ALL" (unchanged)
+		r := session.MustExecToRecodeSet(t, seCurrent, "SELECT variable_value FROM mysql.global_variables WHERE variable_name='tidb_analyze_column_options'")
+		req := r.NewChunk(nil)
+		require.NoError(t, r.Next(ctx, req))
+		require.Equal(t, 1, req.NumRows())
+		row := req.GetRow(0)
+		require.Equal(t, "ALL", row.GetString(0))
+	})
+
+	// Test case 4: 8.3.0 cluster with explicit "PREDICATE" setting
+	// The variable exists with value "PREDICATE" (user explicitly set it)
+	// Should remain "PREDICATE" after upgrade
+	t.Run("8.3.0 upgrade with explicit PREDICATE setting", func(t *testing.T) {
+		store, dom := session.CreateStoreAndBootstrap(t)
+		defer func() { require.NoError(t, store.Close()) }()
+
+		seV210 := session.CreateSessionAndSetID(t, store)
+		txn, err := store.Begin()
+		require.NoError(t, err)
+		m := meta.NewMutator(txn)
+		err = m.FinishBootstrap(int64(210))
+		require.NoError(t, err)
+		err = txn.Commit(context.Background())
+		require.NoError(t, err)
+		revertVersionAndVariables(t, seV210, 210)
+
+		// Set the variable to "PREDICATE" to simulate user explicitly setting it
+		session.MustExec(t, seV210, "REPLACE INTO mysql.global_variables VALUES ('tidb_analyze_column_options', 'PREDICATE')")
+		session.MustExec(t, seV210, "commit")
+
+		store.SetOption(session.StoreBootstrappedKey, nil)
+		ver, err := session.GetBootstrapVersion(seV210)
+		require.NoError(t, err)
+		require.Equal(t, int64(210), ver)
+		dom.Close()
+
+		domCurrent, err := session.BootstrapSession(store)
+		require.NoError(t, err)
+		defer domCurrent.Close()
+
+		seCurrent := session.CreateSessionAndSetID(t, store)
+		ver, err = session.GetBootstrapVersion(seCurrent)
+		require.NoError(t, err)
+		require.Equal(t, session.CurrentBootstrapVersion, ver)
+
+		// Check that the variable remains "PREDICATE" (unchanged)
+		r := session.MustExecToRecodeSet(t, seCurrent, "SELECT variable_value FROM mysql.global_variables WHERE variable_name='tidb_analyze_column_options'")
+		req := r.NewChunk(nil)
+		require.NoError(t, r.Next(ctx, req))
+		require.Equal(t, 1, req.NumRows())
+		row := req.GetRow(0)
+		require.Equal(t, "PREDICATE", row.GetString(0))
+	})
+}
+
+func TestAnalyzeDistsqlConcurrencyByUpgrade750To850(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
+	ctx := context.Background()
+	store, dom := session.CreateStoreAndBootstrap(t)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	// Upgrade from 7.5.0 to 8.5+ or above.
+	ver750 := 180
+	seV7 := session.CreateSessionAndSetID(t, store)
+	txn, err := store.Begin()
+	require.NoError(t, err)
+	m := meta.NewMutator(txn)
+	err = m.FinishBootstrap(int64(ver750))
+	require.NoError(t, err)
+	err = txn.Commit(context.Background())
+	require.NoError(t, err)
+	revertVersionAndVariables(t, seV7, ver750)
+	session.MustExec(t, seV7, fmt.Sprintf("delete from mysql.GLOBAL_VARIABLES where variable_name='%s'", vardef.TiDBAnalyzeDistSQLScanConcurrency))
+	session.MustExec(t, seV7, "commit")
+	store.SetOption(session.StoreBootstrappedKey, nil)
+
+	// We are now in 7.5.0, check tidb_analyze_distsql_scan_concurrency should not exist.
+	res := session.MustExecToRecodeSet(t, seV7, fmt.Sprintf("select * from mysql.GLOBAL_VARIABLES where variable_name='%s'", vardef.TiDBAnalyzeDistSQLScanConcurrency))
+	chk := res.NewChunk(nil)
+	err = res.Next(ctx, chk)
+	require.NoError(t, err)
+	require.Equal(t, 0, chk.NumRows())
+
+	// Change the global variable tidb_distsql_scan_concurrency to 32.
+	session.MustExec(t, seV7, "set @@global.tidb_distsql_scan_concurrency = 32")
+
+	dom.Close()
+	domCurVer, err := session.BootstrapSession(store)
+	require.NoError(t, err)
+	defer domCurVer.Close()
+
+	seCurVer := session.CreateSessionAndSetID(t, store)
+	// We are now in version no lower than 8.5, tidb_analyze_distsql_scan_concurrency should be 32.
+	res = session.MustExecToRecodeSet(t, seCurVer, "select @@global.tidb_analyze_distsql_scan_concurrency")
+	chk = res.NewChunk(nil)
+	err = res.Next(ctx, chk)
+	require.NoError(t, err)
+	require.Equal(t, 1, chk.NumRows())
+	row := chk.GetRow(0)
+	require.Equal(t, 1, row.Len())
+	require.Equal(t, int64(32), row.GetInt64(0))
+}
+
+func TestAutoAnalyzeConcurrencyDefaultOnlyAffectsFreshBootstrap(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
+	store, dom := session.CreateStoreAndBootstrap(t)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	tk := testkit.NewTestKit(t, store)
+	tk.MustQuery("select variable_value from mysql.global_variables where variable_name='tidb_auto_analyze_concurrency'").Check(testkit.Rows(strconv.Itoa(vardef.DefTiDBAutoAnalyzeConcurrency)))
+
+	upgradeFromVersion := session.CurrentBootstrapVersion - 1
+	txn, err := store.Begin()
+	require.NoError(t, err)
+	require.NoError(t, meta.NewMutator(txn).FinishBootstrap(upgradeFromVersion))
+	require.NoError(t, txn.Commit(context.Background()))
+	revertVersionAndVariables(t, tk.Session(), int(upgradeFromVersion))
+	tk.MustExec("update mysql.global_variables set variable_value='8' where variable_name='tidb_auto_analyze_concurrency'")
+	store.SetOption(session.StoreBootstrappedKey, nil)
+	dom.Close()
+
+	domUpgraded, err := session.BootstrapSession(store)
+	require.NoError(t, err)
+	defer domUpgraded.Close()
+
+	testkit.NewTestKit(t, store).MustQuery("select variable_value from mysql.global_variables where variable_name='tidb_auto_analyze_concurrency'").Check(testkit.Rows("8"))
+}
+
+func TestBootstrapInNextGenInvalidSystemTable(t *testing.T) {
+	if kerneltype.IsClassic() {
+		t.Skip("this is only checked in next-gen kernel")
+	}
+	testenv.SetGOMAXPROCSForTest()
+	if kerneltype.IsNextGen() {
+		testenv.UpdateConfigForNextgen(t)
+	}
+	testfailpoint.EnableCall(t, "github.com/pingcap/tidb/pkg/session/mockCreateSystemTableSQL", func(tbl *session.TableBasicInfo) {
+		tbl.SQL = "create table t(id int primary key) partition by hash(id) partitions 4"
+	})
+	store, err := mockstore.NewMockStore(mockstore.WithStoreType(mockstore.EmbedUnistore))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, store.Close())
+	})
+	_, err = session.BootstrapSession(store)
+	require.ErrorContains(t, err, "system table should not be partitioned table")
+}
+
+// TestUpgradeVersion256PlanCacheSkipStatsOnBinding verifies that upgradeToVer256
+// correctly initializes tidb_plan_cache_skip_stats_on_binding to ON when upgrading
+// from a cluster at version 255 where the variable did not yet exist.
+func TestUpgradeVersion256PlanCacheSkipStatsOnBinding(t *testing.T) {
+	if kerneltype.IsNextGen() {
+		t.Skip("Skip this case because there is no upgrade in the first release of next-gen kernel")
+	}
+
+	ctx := context.Background()
+	store, dom := session.CreateStoreAndBootstrap(t)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	seV255 := session.CreateSessionAndSetID(t, store)
+	txn, err := store.Begin()
+	require.NoError(t, err)
+	m := meta.NewMutator(txn)
+	err = m.FinishBootstrap(int64(255))
+	require.NoError(t, err)
+	err = txn.Commit(context.Background())
+	require.NoError(t, err)
+	revertVersionAndVariables(t, seV255, 255)
+
+	// Remove the variable to simulate a pre-256 cluster where it didn't exist yet.
+	session.MustExec(t, seV255, "DELETE FROM mysql.global_variables WHERE variable_name='tidb_plan_cache_skip_stats_on_binding'")
+	session.MustExec(t, seV255, "commit")
+
+	store.SetOption(session.StoreBootstrappedKey, nil)
+	ver, err := session.GetBootstrapVersion(seV255)
+	require.NoError(t, err)
+	require.Equal(t, int64(255), ver)
+	dom.Close()
+
+	domCurrent, err := session.BootstrapSession(store)
+	require.NoError(t, err)
+	defer domCurrent.Close()
+
+	seCurrent := session.CreateSessionAndSetID(t, store)
+	ver, err = session.GetBootstrapVersion(seCurrent)
+	require.NoError(t, err)
+	require.Equal(t, session.CurrentBootstrapVersion, ver)
+
+	// upgradeToVer256 must have initialized the variable to ON.
+	r := session.MustExecToRecodeSet(t, seCurrent, "SELECT variable_value FROM mysql.global_variables WHERE variable_name='tidb_plan_cache_skip_stats_on_binding'")
+	req := r.NewChunk(nil)
+	require.NoError(t, r.Next(ctx, req))
+	require.Equal(t, 1, req.NumRows())
+	row := req.GetRow(0)
+	require.Equal(t, "ON", row.GetString(0))
 }

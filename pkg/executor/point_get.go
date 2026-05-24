@@ -56,14 +56,14 @@ func (b *executorBuilder) buildPointGet(p *physicalop.PointGetPlan) exec.Executo
 		return nil
 	}
 
-	isTableDual, err := p.PrunePartitions(b.ctx)
+	isTableDual, err := p.PrunePartitions(b.sctx)
 	if err != nil {
 		b.err = err
 		return nil
 	}
 	if isTableDual {
 		return &TableDualExec{
-			BaseExecutorV2: exec.NewBaseExecutorV2(b.ctx.GetSessionVars(), p.Schema(), p.ID()),
+			BaseExecutorV2: exec.NewBaseExecutorV2(b.sctx.GetSessionVars(), p.Schema(), p.ID()),
 			numDualRows:    0,
 			numReturned:    0,
 		}
@@ -76,10 +76,10 @@ func (b *executorBuilder) buildPointGet(p *physicalop.PointGetPlan) exec.Executo
 		}()
 	}
 
-	b.ctx.GetSessionVars().StmtCtx.IsTiKV.Store(true)
+	b.sctx.GetSessionVars().StmtCtx.IsTiKV.Store(true)
 
 	e := &PointGetExecutor{
-		BaseExecutor:       exec.NewBaseExecutor(b.ctx, p.Schema(), p.ID()),
+		BaseExecutor:       exec.NewBaseExecutor(b.sctx, p.Schema(), p.ID()),
 		indexUsageReporter: b.buildIndexUsageReporter(p, false),
 		txnScope:           b.txnScope,
 		readReplicaScope:   b.readReplicaScope,
@@ -600,7 +600,13 @@ func (e *PointGetExecutor) lockKeyBase(ctx context.Context,
 
 	if e.lock {
 		seVars := e.Ctx().GetSessionVars()
-		lockCtx, err := newLockCtx(e.Ctx(), e.lockWaitTime, 1)
+		lockWaitTime := e.lockWaitTime
+
+		if err := checkMaxExecutionTimeExceeded(e.Ctx()); err != nil {
+			return nil, err
+		}
+
+		lockCtx, err := newLockCtx(e.Ctx(), lockWaitTime, 1, false)
 		if err != nil {
 			return nil, err
 		}
@@ -660,7 +666,7 @@ func (e *PointGetExecutor) get(ctx context.Context, key kv.Key) ([]byte, error) 
 	if e.txn.Valid() && !e.txn.IsReadOnly() {
 		// We cannot use txn.Get directly here because the snapshot in txn and the snapshot of e.snapshot may be
 		// different for pessimistic transaction.
-		val, err = e.txn.GetMemBuffer().Get(ctx, key)
+		val, err = kv.GetValue(ctx, e.txn.GetMemBuffer(), key)
 		if err == nil {
 			return val, err
 		}
@@ -690,13 +696,14 @@ func (e *PointGetExecutor) get(ctx context.Context, key kv.Key) ([]byte, error) 
 		}
 	}
 	// if not read lock or table was unlock then snapshot get
-	if e.Ctx().GetSessionVars().MaxExecutionTime > 0 {
+	maxExecutionTime := e.Ctx().GetSessionVars().GetMaxExecutionTime()
+	if maxExecutionTime > 0 {
 		// if the query has max execution time set, we need to set the context deadline for the get request
-		ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Duration(e.Ctx().GetSessionVars().MaxExecutionTime)*time.Millisecond)
+		ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Duration(maxExecutionTime)*time.Millisecond)
 		defer cancel()
-		return e.snapshot.Get(ctxWithTimeout, key)
+		return kv.GetValue(ctxWithTimeout, e.snapshot, key)
 	}
-	return e.snapshot.Get(ctx, key)
+	return kv.GetValue(ctx, e.snapshot, key)
 }
 
 func (e *PointGetExecutor) verifyTxnScope() error {
@@ -728,7 +735,7 @@ func (e *PointGetExecutor) verifyTxnScope() error {
 func DecodeRowValToChunk(sctx sessionctx.Context, schema *expression.Schema, tblInfo *model.TableInfo,
 	handle kv.Handle, rowVal []byte, chk *chunk.Chunk, rd *rowcodec.ChunkDecoder) error {
 	if rowcodec.IsNewFormat(rowVal) {
-		return rd.DecodeToChunk(rowVal, handle, chk)
+		return rd.DecodeToChunk(rowVal, 0, handle, chk)
 	}
 	return decodeOldRowValToChunk(sctx, schema, tblInfo, handle, rowVal, chk)
 }

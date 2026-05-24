@@ -67,7 +67,7 @@ func buildHashAggExecutor(ctx sessionctx.Context, src exec.Executor, schema *exp
 	plan.SetSchema(schema)
 	plan.Init(ctx.GetPlanCtx(), nil, 0)
 	plan.SetChildren(nil)
-	b := newExecutorBuilder(ctx, nil, nil)
+	b := newExecutorBuilder(context.Background(), ctx, nil, nil)
 	exec := b.build(plan)
 	hashAgg := exec.(*aggregate.HashAggExec)
 	hashAgg.SetChildren(0, src)
@@ -119,7 +119,7 @@ func buildStreamAggExecutor(ctx sessionctx.Context, srcExec exec.Executor, schem
 		plan = sg
 	}
 
-	b := newExecutorBuilder(ctx, nil, nil)
+	b := newExecutorBuilder(context.Background(), ctx, nil, nil)
 	return b.build(plan)
 }
 
@@ -352,7 +352,7 @@ func buildWindowExecutor(ctx sessionctx.Context, windowFunc string, funcs int, f
 		plan = win
 	}
 
-	b := newExecutorBuilder(ctx, nil, nil)
+	b := newExecutorBuilder(context.Background(), ctx, nil, nil)
 	exec := b.build(plan)
 	return exec
 }
@@ -586,7 +586,7 @@ type hashJoinTestCase struct {
 	concurrency        int
 	ctx                sessionctx.Context
 	keyIdx             []int
-	joinType           logicalop.JoinType
+	joinType           base.JoinType
 	disk               bool
 	useOuterToBuild    bool
 	rawData            string
@@ -607,7 +607,7 @@ func (tc hashJoinTestCase) String() string {
 		tc.rows, tc.cols, tc.concurrency, tc.keyIdx, tc.disk)
 }
 
-func defaultHashJoinTestCase(cols []*types.FieldType, joinType logicalop.JoinType, useOuterToBuild bool) *hashJoinTestCase {
+func defaultHashJoinTestCase(cols []*types.FieldType, joinType base.JoinType, useOuterToBuild bool) *hashJoinTestCase {
 	ctx := mock.NewContext()
 	ctx.GetSessionVars().InitChunkSize = vardef.DefInitChunkSize
 	ctx.GetSessionVars().MaxChunkSize = vardef.DefMaxChunkSize
@@ -621,10 +621,10 @@ func defaultHashJoinTestCase(cols []*types.FieldType, joinType logicalop.JoinTyp
 	return tc
 }
 
-func prepareResolveIndices(joinSchema, lSchema, rSchema *expression.Schema, joinType logicalop.JoinType) *expression.Schema {
+func prepareResolveIndices(joinSchema, lSchema, rSchema *expression.Schema, joinType base.JoinType) *expression.Schema {
 	colsNeedResolving := joinSchema.Len()
 	// The last output column of this two join is the generated column to indicate whether the row is matched or not.
-	if joinType == logicalop.LeftOuterSemiJoin || joinType == logicalop.AntiLeftOuterSemiJoin {
+	if joinType == base.LeftOuterSemiJoin || joinType == base.AntiLeftOuterSemiJoin {
 		colsNeedResolving--
 	}
 	mergedSchema := expression.MergeSchema(lSchema, rSchema)
@@ -687,7 +687,7 @@ func prepare4HashJoinV2(testCase *hashJoinTestCase, innerExec, outerExec exec.Ex
 	// todo: need systematic way to protect.
 	// physical join should resolveIndices to get right schema column index.
 	// otherwise, markChildrenUsedColsForTest will fail below.
-	joinSchema = prepareResolveIndices(joinSchema, innerExec.Schema(), outerExec.Schema(), logicalop.InnerJoin)
+	joinSchema = prepareResolveIndices(joinSchema, innerExec.Schema(), outerExec.Schema(), base.InnerJoin)
 
 	joinKeysColIdx := make([]int, 0, len(testCase.keyIdx))
 	joinKeysColIdx = append(joinKeysColIdx, testCase.keyIdx...)
@@ -776,7 +776,7 @@ func prepare4HashJoin(testCase *hashJoinTestCase, innerExec, outerExec exec.Exec
 	// todo: need systematic way to protect.
 	// physical join should resolveIndices to get right schema column index.
 	// otherwise, markChildrenUsedColsForTest will fail below.
-	joinSchema = prepareResolveIndices(joinSchema, innerExec.Schema(), outerExec.Schema(), logicalop.InnerJoin)
+	joinSchema = prepareResolveIndices(joinSchema, innerExec.Schema(), outerExec.Schema(), base.InnerJoin)
 
 	joinKeysColIdx := make([]int, 0, len(testCase.keyIdx))
 	joinKeysColIdx = append(joinKeysColIdx, testCase.keyIdx...)
@@ -1253,7 +1253,7 @@ func prepare4IndexInnerHashJoin(tc *IndexJoinTestCase, outerDS *testutil.MockDat
 		keyOff2IdxOff[i] = i
 	}
 
-	readerBuilder, err := newExecutorBuilder(tc.Ctx, nil, nil).
+	readerBuilder, err := newExecutorBuilder(context.Background(), tc.Ctx, nil, nil).
 		newDataReaderBuilder(&mockPhysicalIndexReader{e: innerDS})
 	if err != nil {
 		return nil, err
@@ -1272,6 +1272,7 @@ func prepare4IndexInnerHashJoin(tc *IndexJoinTestCase, outerDS *testutil.MockDat
 			ColLens:       colLens,
 			KeyCols:       tc.InnerJoinKeyIdx,
 			HashCols:      tc.InnerHashKeyIdx,
+			HashIsNullEQ:  make([]bool, len(tc.InnerHashKeyIdx)),
 		},
 		WorkerWg:      new(sync.WaitGroup),
 		Joiner:        join.NewJoiner(tc.Ctx, 0, false, defaultValues, nil, leftTypes, rightTypes, nil, false),
@@ -1327,7 +1328,7 @@ func prepare4IndexMergeJoin(tc *IndexJoinTestCase, outerDS *testutil.MockDataSou
 		outerCompareFuncs = append(outerCompareFuncs, expression.GetCmpFunction(nil, outerJoinKeys[i], outerJoinKeys[i]))
 	}
 
-	readerBuilder, err := newExecutorBuilder(tc.Ctx, nil, nil).
+	readerBuilder, err := newExecutorBuilder(context.Background(), tc.Ctx, nil, nil).
 		newDataReaderBuilder(&mockPhysicalIndexReader{e: innerDS})
 	if err != nil {
 		return nil, err
@@ -2055,10 +2056,10 @@ func BenchmarkAggPartialResultMapperMemoryUsage(b *testing.B) {
 		b.Run(fmt.Sprintf("MapRows %v", c.rowNum), func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				aggMap := make(aggfuncs.AggPartialResultMapper)
+				aggMap := aggfuncs.NewAggPartialResultMapper()
 				tempSlice := make([]aggfuncs.PartialResult, 10)
 				for num := range c.rowNum {
-					aggMap[strconv.Itoa(num)] = tempSlice
+					aggMap.Set(strconv.Itoa(num), tempSlice)
 				}
 			}
 		})
